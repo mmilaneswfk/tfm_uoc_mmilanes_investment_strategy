@@ -1,0 +1,39 @@
+# Data Store Configuration
+DATA_STORE: ../data/assets.h5
+
+# Target
+TARGET_NAME: target_1
+
+# Model Behavior
+use_best_params: True
+incremental_training: True
+retrain_model: True
+YEAR: 52
+TARGET_THRESHOLD: 0
+YEARS_TRAIN: 8
+WEEKS_TEST: 1
+CV_SPLITS: 30
+CV_PURGE: 3
+USE_RETURN_AS_WEIGHT: true
+
+# Model Fixed Parameters
+model_params:
+  objective: binary
+  is_unbalance: false
+  metric: average_precision_score
+  boosting_type: gbdt
+  extra_trees : true
+  # use_quantized_grad : true
+  # num_grad_quant_bins: 20
+  verbose: -1
+
+# Backtesting configuration
+backtest_start_date: 2022-01-01
+backtest_end_date: 2024-10-22 # Doesn't work if to_date is True
+backtest_to_date: True
+backtest_frequency: 1w
+
+
+CATEGORICAL_FEATURES:
+  - 'sector'
+  - 'weekofyear'

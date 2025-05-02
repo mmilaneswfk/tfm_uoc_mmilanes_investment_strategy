@@ -1,0 +1,130 @@
+# Data Store Configuration
+DATA_STORE: ../data/assets.h5
+
+# Time-related constants
+time_constants:
+  WEEKS_PER_YEAR: 52
+  WEEKS_PER_MONTH: 4
+  YEARS_FOR_TICKER_VALIDITY: 5
+  YEARS_FOR_ROLLING_WINDOW: 2
+  MIN_PERIODS_FOR_ROLLING: 6
+
+# Create dataset
+start_year: 2000
+interval: '1wk'
+outlier_cutoff: 0.01
+normalize: True
+neutralize: False
+excess_return: True
+check_nulls_data: True
+
+ticker_list:
+  - XLE # Energy Select Sector SPDR Fund
+  - XLB # Materials Select Sector SPDR Fund
+  - XLI # Industrial Select Sector SPDR Fund
+  - XLK # Technology Select Sector SPDR Fund
+  - XLF # Financial Select Sector SPDR Fund
+  - XLP # Consumer Staples Select Sector SPDR Fund
+  - XLY # Consumer Discretionary Select Sector SPDR Fund
+  - XLV # Health Care Select Sector SPDR Fund
+  - XLU # Utilities Select Sector SPDR Fund
+  - IYR # iShares U.S. Real Estate ETF
+  - VOX # Communication Services Select Sector SPDR Fund
+  - SPY # SPDR S&P 500 ETF Trust
+  # - IWM
+  # - IWC
+
+lags:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 6
+  - 8
+  - 12
+  - 24
+  - 52
+
+momentum:
+  - 2
+  - 3
+  - 6
+  - 12
+  - 52
+
+lagged_returns:
+  start: 1
+  end: 7
+
+fama_french_factors: # Delayed about 3 months
+  - Mkt-RF # Market Risk Premium: Market return minus risk-free rate.
+  - SMB # Small Minus Big: Return spread between small and large-cap stocks.
+  - HML # High Minus Low: Return spread between high and low book-to-market stocks.
+  - RMW # Robust Minus Weak: Return spread between firms with robust and weak profitability.
+  - CMA # Conservative Minus Aggressive: Return spread between firms with conservative and aggressive investment strategies.
+
+fred_indicators:
+  - JHDUSRGDPBR # Johnson Redbook Index: Weekly retail sales growth.
+  - T10Y3M # 10Y Treasury minus 3M Treasury yield spread.
+  - BAMLC0A0CM # ICE BofA US Corporate Index OAS: Investment-grade bond spread.
+  - BAMLH0A0HYM2 # ICE BofA US High Yield Index OAS: High-yield bond spread. :contentReference[oaicite:0]{index=0}
+  - BAMLHE00EHYIOAS # ICE BofA Euro High Yield Index OAS: Euro-denominated high-yield bond spread.
+  - UMCSENT # University of Michigan Consumer Sentiment Index.
+  - UNRATE # Civilian Unemployment Rate.
+  - GDPC1 # Real Gross Domestic Product.
+  - DCOILWTICO # Crude Oil Prices: WTI - Cushing, Oklahoma.
+  - CORESTICKM159SFRBATL # Sticky Price CPI: Core inflation for infrequently adjusted prices.
+  - USSLIND # Leading Index for the United States: Forecasts future economic activity.
+  - VIXCLS # CBOE Volatility Index: Expected 30-day market volatility.
+  - OVXCLS # CBOE Crude Oil ETF Volatility Index: Expected 30-day oil price volatility.
+  - ICSA # Initial Claims: First-time unemployment benefits filings.
+  - MARTSMPCSM44000USS # Retail Sales: Retail trade and food services sales.
+  - RSXFS # Retail Sales Excluding Food Services.
+  - TREAST # Treasury Assets: Total U.S. Treasury assets.
+  - DGS1 # 1-Year Treasury Constant Maturity Rate.
+
+fred_label:
+  - recession
+
+fred_features:
+  - yield_curve # Yield curve spread: Difference between long-term and short-term Treasury yields.
+  - corp_oas # Corporate bond option-adjusted spread: Measures credit risk in corporate bonds.
+  - hy_oas # High yield bond option-adjusted spread: Indicates risk premium for high-yield bonds.
+  - eu_hy_oas # Euro high yield bond option-adjusted spread: Risk premium for Euro-denominated high-yield bonds.
+  - sentiment # Consumer sentiment index: Reflects consumer confidence in the economy.
+  - empleo # Employment rate: Percentage of the labor force that is employed.
+  - real_gdp # Real Gross Domestic Product: Inflation-adjusted value of goods and services produced.
+  - oil # Crude oil prices: Benchmark prices for crude oil.
+  - inflation # Inflation rate: Rate at which the general price level of goods and services is rising.
+  - leading # Leading economic index: Composite index forecasting future economic activity.
+  - vix # CBOE Volatility Index: Market's expectation of near-term volatility.
+  - vixoil # Crude Oil Volatility Index: Expected volatility in crude oil prices.
+  - weekjobclaims # Weekly jobless claims: Number of individuals filing for unemployment benefits for the first time.
+  - retail_sales_percent # Retail sales growth rate: Percentage change in retail sales over a period.
+  - retail_sales # Total retail sales: Aggregate sales in the retail sector.
+  - us_asset_balance # U.S. Treasury assets: Total assets held by the U.S. Treasury.
+  - 1y_yield # 1-Year Treasury yield: Yield on 1-year U.S. Treasury securities.
+
+columns_to_drop:
+  - empleo
+  - us_asset_balance
+
+fred_shifts:
+  recession: "1Q"
+  yield_curve: "1D"
+  corp_oas: "1D"
+  hy_oas: "1D"
+  eu_hy_oas: "1D"
+  sentiment: "1M"
+  empleo: "1M"
+  real_gdp: "1Q"
+  oil: "1D"
+  inflation: "1M"
+  leading: "1M"
+  vix: "1D"
+  vixoil: "1D"
+  weekjobclaims: "1W"
+  retail_sales_percent: "1M"
+  retail_sales: "1M"
+  us_asset_balance: "1D"
+  1y_yield: "1D"
