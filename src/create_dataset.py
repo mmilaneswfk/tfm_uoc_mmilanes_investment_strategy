@@ -109,20 +109,15 @@ new_names = ['open', 'high', 'low','close','volume', 'adj_close']
 data = data[new_order]
 data.columns = new_names
 
-# Create a separate dataframe for ticker SPY
+# Extract SPY data and remove duplicates
 spy_prices = data.xs('SPY', level='ticker')[['close']]
-# Remove duplicate indices if they exist
 spy_prices = spy_prices[~spy_prices.index.duplicated(keep='first')]
 
-# Remove SPY from the original prices dataframe
+# Get prices without SPY, remove duplicates, and reorganize by ticker
 prices = data.drop('SPY', level='ticker')[['close']]
-# Remove duplicate indices if they exist
-prices = prices[~prices.index.duplicated(keep='first')]
+prices = prices[~prices.index.duplicated(keep='first')].unstack('ticker')
 
-# Unstack by ticker
-prices = prices.unstack('ticker')
-
-# Resample both prices and spy_prices to weekly granularity, keeping the last observation of each week
+# Convert to weekly data
 prices = prices.resample('W').last()
 spy_prices = spy_prices.resample('W').last()
 
