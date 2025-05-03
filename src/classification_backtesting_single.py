@@ -4,6 +4,7 @@ warnings.filterwarnings('ignore')
 
 import os
 import datetime
+import copy
 import numpy as np
 import pandas as pd
 import yaml
@@ -44,6 +45,7 @@ with open(config_path, 'r') as file:
     backtest_end_date = config['backtest_end_date']
     backtest_to_date = config['backtest_to_date']
     backtest_frequency = config['backtest_frequency']
+    COVID_FILTER = config['COVID_FILTER']
     retrain_model = config['retrain_model']
     YEAR = config['YEAR']
     TARGET_THRESHOLD = config['TARGET_THRESHOLD']
@@ -89,12 +91,50 @@ if USE_RETURN_AS_WEIGHT:
 else:
     sample_weights = None
 
+
+# Define COVID period dates (ensure consistency with modeling script, maybe load from config)
+COVID_START_DATE = pd.Timestamp('2020-02-20', tz='UTC')
+COVID_END_DATE = pd.Timestamp('2020-06-30', tz='UTC')
+
+# Apply COVID filter if enabled in config
+if COVID_FILTER:
+    print(f"Filtering out COVID period: {COVID_START_DATE.date()} to {COVID_END_DATE.date()}")
+    
+    # Create mask based on X's date index
+    covid_mask = ~((X.index.get_level_values('date') >= COVID_START_DATE) & 
+                   (X.index.get_level_values('date') <= COVID_END_DATE))
+    
+    initial_rows = len(X)
+    
+    # Apply filter to X and y
+    X = X.loc[covid_mask]
+    y = y.loc[covid_mask]
+    
+    # Apply filter to sample_weights if they exist
+    if sample_weights is not None:
+        # Ensure sample_weights index matches X before filtering
+        if not sample_weights.index.equals(X.index):
+             # Reindex weights to match the filtered X index (handles potential mismatches)
+             sample_weights = sample_weights.reindex(X.index)
+             # Note: Reindexing might introduce NaNs if weights were missing for some X rows. Handle as needed.
+        else:
+             # If indices already match (after filtering X/y), filter weights directly
+             sample_weights = sample_weights.loc[covid_mask]
+
+
+    removed_rows = initial_rows - len(X)
+    print(f"Removed {removed_rows} rows due to COVID filter.")
+else:
+    print("COVID filter is disabled.")
+
+
 #%%
 # Load and apply feature selection if available
 try:
     with pd.HDFStore(DATA_STORE) as store:
         selected_features = store['selected_features'].values
-        X = X[selected_features]
+        # Apply feature selection *after* potential COVID filtering
+        X = X[selected_features] 
 except KeyError:
     print("No feature selection found in store, using all features")
 except Exception as e:
@@ -180,6 +220,10 @@ backtest_dates = pd.date_range(start=backtest_start_date,
                               end=backtest_end_date, 
                               freq=backtest_frequency)
 
+model_pre = None
+train_df_pre = None
+valid_df_pre = None
+
 for test_date in backtest_dates:
     train_df, valid_df = create_lgbm_dataset(X, y,
                                             lookback_period=YEARS_TRAIN * 52,
@@ -207,22 +251,31 @@ for test_date in backtest_dates:
     valid_pred = model.predict(valid_df.data)
     valid_pred_proba = model.predict_proba(valid_df.data)[:, 1]
 
-    # Calibrate the model
-    calibrator = CalibratedClassifierCV(model,
-                                        method='sigmoid',
-                                        cv='prefit') # Use prefit since model is already trained
+    if model_pre is not None:
+        # Calibrate the model
+        calibrator = CalibratedClassifierCV(model_pre,
+                                            method='sigmoid',
+                                            cv='prefit') # Use prefit since model is already trained
 
-    # Fit calibrator on the same training data used for the model in this iteration
-    calibrator.fit(train_df.data, train_df.label)
+        # Fit calibrator on the same training data used for the model in this iteration
+        calibrator.fit(train_df_pre.data, train_df_pre.label)
 
-    # Make calibrated predictions and probabilities
-    calibrator_pred = calibrator.predict(valid_df.data)
-    calibrator_pred_proba = calibrator.predict_proba(valid_df.data)[:, 1] # Get probability for the positive class
+        # Make calibrated predictions and probabilities
+        calibrator_pred = calibrator.predict(valid_df.data)
+        calibrator_pred_proba = calibrator.predict_proba(valid_df.data)[:, 1] # Get probability for the positive class
+    else:
+        # If no previous model, use the current model's predictions
+        calibrator_pred = valid_pred
+        calibrator_pred_proba = valid_pred_proba
 
+    # Store previous model and data if needed for analysis or comparison
+
+    model_pre = copy.deepcopy(model)
+    train_df_pre = copy.deepcopy(train_df)
+    valid_df_pre = copy.deepcopy(valid_df)
     # Store results
     if len(np.unique(valid_df.label)) == 1:
         # Handle cases where only one class is present in the validation set
-        metric = accuracy_score(valid_df.label, valid_pred)
         result = {
             'date': test_date,
             'predictions': valid_pred,
@@ -230,8 +283,8 @@ for test_date in backtest_dates:
             'true_labels': valid_df.label.values,
             'calibrator_predictions': calibrator_pred,
             'calibrator_predictions_proba': calibrator_pred_proba, # Added calibrated probabilities
-            'validation_auc': metric, # Use accuracy as a fallback metric
-            'validation_ap': metric  # Use accuracy as a fallback metric
+            'validation_auc': np.nan, # Set to None when only one class is present
+            'validation_ap': np.nan  # Set to None when only one class is present
         }
     else:
         # Standard case with multiple classes
@@ -255,12 +308,11 @@ concatenated_valid_df = lgb.Dataset(
     categorical_feature=CATEGORICAL_FEATURES
 )
 
-# %%
 # %% Post-Backtesting Analysis
 
 # Load returns data needed for subsequent analyses
 returns_df = pd.read_csv(os.path.join(os.path.dirname(os.path.abspath(__file__ if '__file__' in locals() else '')),
-                                      "../output/returns_1.csv"), index_col=0, parse_dates=True)
+                                      "../output/target.csv"), index_col=0, parse_dates=True)
 returns_df.index = pd.to_datetime(returns_df.index) # Ensure index is datetime
 
 # Get unique sectors from the data index

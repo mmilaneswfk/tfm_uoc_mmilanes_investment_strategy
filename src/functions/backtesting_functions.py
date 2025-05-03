@@ -1,6 +1,6 @@
 import lightgbm as lgb
 import pandas as pd
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 import os
 import pickle
 import numpy as np
@@ -292,20 +292,41 @@ def compare_predictions(valid_results):
     else:
         return pd.DataFrame(columns=['total_differences', 'percent_different', 'regular_positive', 'calibrated_positive'])
 
-def analyze_predictions_accuracy(valid_results, sectors=None, calibrated=False):
-    # Convert predictions and true labels to arrays
+def analyze_predictions_accuracy(valid_results: List[Dict], sectors: List[str] = None, calibrated: bool = False) -> pd.DataFrame:
+    """
+    Scores prediction accuracy: +1 for true positives, -1 for false positives, 0 otherwise.
+    
+    Args:
+        valid_results: List of backtest results
+        sectors: List of sector names for columns
+        calibrated: Whether to use calibrated predictions
+        
+    Returns:
+        DataFrame with scores by date and sector
+    """
+    # Get predictions and true values
     pred_key = 'calibrator_predictions' if calibrated else 'predictions'
-    pred_array = np.array([x[pred_key] for x in valid_results])
-    true_array = np.array([x['true_labels'] for x in valid_results])
+    pred_array = np.array([x[pred_key] for x in valid_results], dtype=bool)
+    true_array = np.array([x['true_labels'] for x in valid_results], dtype=bool)
     dates = np.array([x['date'] for x in valid_results])
 
-    # Calculate results using vectorized operations
-    res_1 = np.where(np.logical_and(pred_array,true_array), np.ones_like(pred_array),np.zeros_like(pred_array))
-    res_2 = np.where(np.logical_and(pred_array,np.logical_not(true_array)), -np.ones_like(pred_array),res_1)
+    # Calculate scores: +1 for true positives, -1 for false positives
+    tp_score = (pred_array & true_array) * 1
+    fp_score = (pred_array & ~true_array) * -1
+    scores = tp_score + fp_score
 
-    # Create result DataFrame 
-    result_df = pd.DataFrame(index=pd.DatetimeIndex(dates),
-                           columns=sectors,
-                           data=res_2)
-    
+    # Create result DataFrame
+    if sectors is None and pred_array.ndim > 1:
+        num_cols = pred_array.shape[1]
+        sectors = [f'col_{i}' for i in range(num_cols)]
+        print("Warning: 'sectors' not provided, using generic column names.")
+    elif sectors is not None and pred_array.ndim > 1 and len(sectors) != pred_array.shape[1]:
+         raise ValueError(f"Number of sectors ({len(sectors)}) does not match number of prediction columns ({pred_array.shape[1]})")
+
+    result_df = pd.DataFrame(
+        data=scores,
+        index=pd.DatetimeIndex(dates),
+        columns=sectors
+    )
+
     return result_df
