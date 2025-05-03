@@ -12,7 +12,7 @@ from src.utils import MultipleTimeSeriesCV
 from src.functions.feature_engineering_functions import (create_lags, create_rolling_features, 
     create_momentum_features, create_time_features, 
     create_time_encoding_rbf, simple_labelling,
-    create_diff, last_target_outcomes)
+    create_diff, last_target_outcomes, create_cyclical_features)
 from src.functions.optimization_functions import purge_cv_folds, parse_hyperparameter_space, custom_logloss, average_precision_eval
 from src.functions.feature_selection_functions import BorutaShap
 from sklearn.metrics import roc_auc_score, average_precision_score
@@ -22,6 +22,8 @@ import seaborn as sns
 import pandas as pd
 import numpy as np
 from scipy.stats import spearmanr
+from itertools import combinations
+import random
 
 RANDOM_SEED = 42 # Set random seed for reproducibility
 
@@ -38,6 +40,7 @@ with open(config_path, 'r') as file:
     YEARS_TRAIN = config['YEARS_TRAIN']
     WEEKS_TEST = config['WEEKS_TEST']
     VALIDATION_DATE = config['VALIDATION_DATE']
+    COVID_FILTER = config['COVID_FILTER']
 
     # Cross-validation parameters
     CV_SPLITS = config['CV_SPLITS']
@@ -67,6 +70,12 @@ with open(config_path, 'r') as file:
 
 idx = pd.IndexSlice
 
+# Define key time periods
+CV_START_DATE = pd.Timestamp(VALIDATION_DATE, tz='UTC') - pd.DateOffset(years=3*YEARS_TRAIN)
+VALIDATION_TIMESTAMP = pd.Timestamp(VALIDATION_DATE, tz='UTC')
+COVID_START_DATE = pd.Timestamp('2020-02-20', tz='UTC')
+COVID_END_DATE = pd.Timestamp('2020-06-30', tz='UTC')
+
 DATA_STORE = os.path.join(os.path.dirname(os.path.abspath(__file__ if '__file__' in locals() else '')), 
                           DATA_STORE)
 
@@ -87,10 +96,22 @@ target_unstacked.to_csv(os.path.join(os.path.dirname(os.path.abspath(__file__ if
                                         '../output/target.csv'), index=True)
 
 weights_unstacked = data[TARGET_NAME].fillna(0).unstack(level=0)
+# Apply standardization to each column (z-score normalization)
+for col in weights_unstacked.columns:
+    weights_date_mask = ((weights_unstacked.index >= CV_START_DATE) & 
+                         (weights_unstacked.index < VALIDATION_TIMESTAMP))
+    mean_val = weights_unstacked.loc[weights_date_mask, col].mean()
+    std_val = weights_unstacked.loc[weights_date_mask, col].std()
+    if std_val > 0:  # Avoid division by zero
+        weights_unstacked[col] = (weights_unstacked[col] - mean_val) / std_val
+
+weights_unstacked = weights_unstacked.abs().sort_index()
+
 weights_unstacked.to_csv(os.path.join(os.path.dirname(os.path.abspath(__file__ if '__file__' in locals() else '')),
                                         '../output/weights.csv'), index=True)
 weights_stacked = weights_unstacked.stack()
 weights_stacked.index = weights_stacked.index.swaplevel()
+weights_stacked = weights_stacked.sort_index()
 
 # Remove any columns that start with 'target_'
 data = data.loc[:, ~(data.columns.str.startswith('target_') & (data.columns != TARGET_NAME))]
@@ -109,6 +130,7 @@ data = create_time_features(data, TIME_FEATURES.keys())
 data = create_time_encoding_rbf(data, TIME_FEATURES, 6)
 data = create_diff(data, DIFF)
 data = last_target_outcomes(data, TARGET_NAME, TARGET_THRESHOLD)
+data = create_cyclical_features(data, ['month', 'weekofyear'])
 
 # Keep only columns with 'return' that contain 't-' followed by a number, or if they match TARGET_NAME
 data = data.loc[:, ~(data.columns.str.startswith('return') & 
@@ -144,44 +166,37 @@ if COLUMNS_TO_DROP:
     else:
         print("No columns to drop found in data")
 
-#%% Spliting the data
-# Split data into features (X) and target (y)
-# Create date filter condition
-date_filter = (
-    (data.index.get_level_values('date') < pd.Timestamp(VALIDATION_DATE, tz='UTC')) & 
-    (data.index.get_level_values('date') >= pd.Timestamp(VALIDATION_DATE, tz='UTC') - pd.DateOffset(years=3*YEARS_TRAIN))
-)
-
+#%% Data splitting and preparation
 # Split data into features (X) and target (y)
 y = data[TARGET_NAME]
 X = data.drop(TARGET_NAME, axis=1)
 
-# Check if COVID_FILTER exists in config, otherwise set default
-COVID_FILTER = config.get('COVID_FILTER', False)  # Default to False if not in config
-
-# Define COVID period dates (most impactful market period)
-COVID_START_DATE = pd.Timestamp('2020-02-20', tz='UTC')  # Beginning of market crash
-COVID_END_DATE = pd.Timestamp('2020-06-30', tz='UTC')    # Most severe market impact period
-
-# Filter out COVID period if enabled
+# Apply COVID filter if enabled
 if COVID_FILTER:
-    print(f"Filtering out COVID period from {COVID_START_DATE.date()} to {COVID_END_DATE.date()}")
-    covid_filter = ~((data.index.get_level_values('date') >= COVID_START_DATE) & 
-                     (data.index.get_level_values('date') <= COVID_END_DATE))
-    data = data.loc[covid_filter]
-    X = X.loc[covid_filter]
-    y = y.loc[covid_filter]
+    print(f"Filtering out COVID period: {COVID_START_DATE.date()} to {COVID_END_DATE.date()}")
+    covid_mask = ~((X.index.get_level_values('date') >= COVID_START_DATE) & 
+                  (X.index.get_level_values('date') <= COVID_END_DATE))
     
-    # Also update weights if they're being used
-    if USE_RETURN_AS_WEIGHT:
-        weights_stacked = weights_stacked.loc[covid_filter]
+    # Apply filter to all relevant datasets
+    X = X.loc[covid_mask]
+    y = y.loc[covid_mask]
+    # Create COVID mask for weights using its own index
+    weights_covid_mask = ~((weights_stacked.index.get_level_values('date') >= COVID_START_DATE) & 
+                          (weights_stacked.index.get_level_values('date') <= COVID_END_DATE))
+    weights_stacked = weights_stacked.loc[weights_covid_mask]
 
-# Labeling
+# Create date filter for CV data
+date_mask = ((X.index.get_level_values('date') >= CV_START_DATE) & 
+             (X.index.get_level_values('date') < VALIDATION_TIMESTAMP))
+
+# Apply binary labeling to target variable
 y = simple_labelling(y, TARGET_THRESHOLD)
 
-# Apply date filter to create CV datasets
-X_cv = X[date_filter]
-y_cv = y[date_filter]
+# Create CV datasets with date filter
+X_cv = X.loc[date_mask]
+y_cv = y.loc[date_mask]
+
+print(f"CV dataset: {X_cv.shape[0]} samples from {CV_START_DATE.date()} to {VALIDATION_TIMESTAMP.date()}")
 
 #%% Feature selection
 # Initialize BorutaShap for feature selection
@@ -208,12 +223,12 @@ if selected_features is None:
                                     colsample_bytree=0.8,
                                     min_child_samples=60,
                                     force_col_wise = True,
-                                    boosting_type='rf',
-                                    extra_trees=True,
-                                    objective='binary',
-                                    metric='average_precision_score',
+                                    boosting_type=HYPERPARAMETER_SPACE['boosting_type'][0],
+                                    extra_trees=HYPERPARAMETER_SPACE['extra_trees'][0],
+                                    objective=HYPERPARAMETER_SPACE['objective'][0],
+                                    metric=HYPERPARAMETER_SPACE['metric'][0],
                                     learning_rate=0.5,
-                                    is_unbalance=True,
+                                    is_unbalance=HYPERPARAMETER_SPACE['is_unbalance'][0],
                                     verbose = -1,),
                         importance_measure='shap',
                         classification=True,
@@ -225,7 +240,7 @@ if selected_features is None:
                          sample_weight=weights,
                          categorical_feature = CATEGORICAL_FEATURES,
                         n_trials=50, sample=True,
-                        train_or_test = 'test', normalize=True, random_state=RANDOM_SEED,
+                        train_or_test = 'test', normalize=False, random_state=RANDOM_SEED,
                 verbose=True)
     # Get selected features
 
@@ -235,19 +250,69 @@ if selected_features is None:
     # Print results
     print(f"Number of selected features: {len(selected_features)}")
     print("Selected features:", selected_features)
-selected_features = list(selected_features) + [x for x in COLUMNS_TO_KEEP if x not in selected_features]
+# Start with the base selected features from BorutaShap
+selected_features = list(selected_features)
 
-if "vix_diff" in selected_features and "vix_chg" in selected_features:
-    selected_features.remove("vix_chg")
+# Add required features that might be missing
+missing_required = [col for col in COLUMNS_TO_KEEP if col not in selected_features]
+if missing_required:
+    print(f"Adding {len(missing_required)} required columns")
+    selected_features.extend(missing_required)
 
+# Add time-related features if specified
 if KEEP_TIME_FEATURES:
-    time_rbf_features = [col for col in X.columns if col.startswith('time_rbf_') and col not in selected_features]
-    selected_features.extend(time_rbf_features)
-print(selected_features)
+    # Add cyclical time features (sin/cos)
+    sin_cos_features = [col for col in X.columns if (col.endswith('_sin') or col.endswith('_cos')) 
+                        and col not in selected_features]
+    # Add RBF time encodings
+    time_rbf_features = [col for col in X.columns if col.startswith('time_rbf_') 
+                         and col not in selected_features]
+    
+    time_features = sin_cos_features + time_rbf_features
+    if time_features:
+        print(f"Adding {len(time_features)} time-related features")
+        selected_features.extend(time_features)
 
-# Drop specified columns
+# Remove specified columns to drop
 if COLUMNS_TO_DROP:
+    before_count = len(selected_features)
     selected_features = [col for col in selected_features if col not in COLUMNS_TO_DROP]
+    removed = before_count - len(selected_features)
+    if removed > 0:
+        print(f"Removed {removed} columns specified in COLUMNS_TO_DROP")
+
+# Check for correlated features
+print("\n==== Checking for Correlated Features ====")
+X_cv_filtered = X_cv[X_cv.index.get_level_values('date') >= pd.Timestamp('2009-01-01', tz='UTC')]
+print(f"Computing correlation matrix for {len(selected_features)} features...")
+
+# Calculate correlation matrix
+corr_matrix = X_cv_filtered[selected_features].corr(method='spearman').abs()
+
+# Find and remove highly correlated features
+features_to_remove = set()
+for i, feature_i in enumerate(selected_features):
+    for feature_j in selected_features[i+1:]:
+        corr_value = corr_matrix.loc[feature_i, feature_j]
+        if np.isnan(corr_value):
+            continue
+        if corr_value > 0.7:
+            print(f"  High correlation ({corr_value:.2f}): keeping '{feature_i}', removing '{feature_j}'")
+            features_to_remove.add(feature_j)
+
+if features_to_remove:
+    print(f"Removing {len(features_to_remove)} highly correlated features")
+    selected_features = [f for f in selected_features if f not in features_to_remove]
+else:
+    print("No highly correlated features found")
+
+# Final verification for required columns
+missing_required = [col for col in COLUMNS_TO_KEEP if col not in selected_features]
+if missing_required:
+    print(f"Re-adding {len(missing_required)} required columns that were removed during correlation check")
+    selected_features.extend(missing_required)
+
+print(f"\nFinal feature count: {len(selected_features)} features")
 
 # Save selected features to model_data.h5
 with pd.HDFStore(DATA_STORE) as store:
@@ -255,6 +320,50 @@ with pd.HDFStore(DATA_STORE) as store:
 
 X = X[selected_features]
 X_cv = X_cv[selected_features]
+
+#%% Check for missing values
+# Analyze missing values by year and column
+print("==== Missing Value Analysis ====")
+
+# 1. Count dates with missing values by year
+# Create a Series indicating if a date has any null values across any stock
+has_null_by_date = X_cv.groupby(level='date').apply(lambda x: x.isna().any().any())
+
+# Group by year and calculate statistics
+print("\n1. Dates with missing values by year:")
+# Check for duplicate dates
+unique_dates = has_null_by_date.index.nunique()
+if len(has_null_by_date) != unique_dates:
+    print(f"  Warning: Found {len(has_null_by_date) - unique_dates} duplicate dates")
+    # Remove duplicates if any
+    has_null_by_date = has_null_by_date[~has_null_by_date.index.duplicated()]
+
+# Create lists of dates with and without nulls
+dates_with_nulls = has_null_by_date[has_null_by_date].index
+dates_without_nulls = has_null_by_date[~has_null_by_date].index
+
+print(f"  Dates with nulls: {len(dates_with_nulls)} dates")
+print(f"  Dates without nulls: {len(dates_without_nulls)} dates")
+print(f"  Percentage of dates with nulls: {(len(dates_with_nulls) / len(has_null_by_date)) * 100:.1f}%")
+
+# Get years with at least one date having nulls
+years_with_nulls = sorted(set(d.year for d in dates_with_nulls))
+# Get years where no date has nulls
+all_years = sorted(set(d.year for d in has_null_by_date.index))
+years_without_nulls = sorted(set(all_years) - set(years_with_nulls))
+
+print(f"  Years with nulls: {', '.join(map(str, years_with_nulls))}")
+print(f"  Years without nulls: {', '.join(map(str, years_without_nulls))}")
+
+# 2. Calculate columns with most nulls
+null_counts = X_cv.isna().sum()
+null_percent = (null_counts / len(X_cv)) * 100
+top_null_columns = null_percent.sort_values(ascending=False).head(5)
+
+print("\n2. Top 5 columns with highest percentage of nulls:")
+for col, pct in top_null_columns.items():
+    count = null_counts[col]
+    print(f"  {col}: {count} nulls ({pct:.2f}%)")
 
 #%% Optimization step
 # Create cv split
@@ -313,15 +422,24 @@ with pd.HDFStore(DATA_STORE) as store:
     store.put('best_params', pd.Series(best_params), format='table', data_columns=True)
 
 #%%
-# Train final model with best parameters on all CV data
-weights_tdata = weights_stacked.loc[X_cv.dropna().index].abs() if USE_RETURN_AS_WEIGHT else None
-dtrain = lgb.Dataset(X_cv.dropna(), label=y_cv.loc[X_cv.dropna().index], categorical_feature = CATEGORICAL_FEATURES,
+# Create a sample using only the last 2 years of data
+max_date = X_cv.index.get_level_values('date').max()
+train_years_ago = max_date - pd.DateOffset(years=YEARS_TRAIN)
+date_sample_filter = X_cv.index.get_level_values('date') >= train_years_ago
+
+# Create sample datasets
+X_sample = X_cv[date_sample_filter]
+y_sample = y_cv[date_sample_filter]
+
+# Train final model with best parameters on sample data
+weights_tdata = weights_stacked.loc[X_sample.dropna().index].abs() if USE_RETURN_AS_WEIGHT else None
+dtrain = lgb.Dataset(X_sample.dropna(), label=y_sample.loc[X_sample.dropna().index], categorical_feature=CATEGORICAL_FEATURES,
                      weight=weights_tdata)
 final_model = lgb.train(best_params, dtrain)
 
 # Get feature importances
 importances = pd.DataFrame({
-    'feature': X_cv.columns,
+    'feature': X_sample.columns,
     'importance': final_model.feature_importance(importance_type='gain')
 })
 importances = importances.sort_values('importance', ascending=False)
@@ -333,3 +451,5 @@ importances['importance_pct'] = importances['importance'] / importances['importa
 print("\nTop 5 most important features (% of total importance):")
 print(importances[['feature', 'importance_pct']].head())
 
+
+# %%

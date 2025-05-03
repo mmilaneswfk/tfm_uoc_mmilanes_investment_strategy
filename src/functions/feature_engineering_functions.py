@@ -230,3 +230,48 @@ def last_target_outcomes(df: pd.DataFrame, target_name: str, threshold: float = 
     result = result.drop('target_binary', axis=1)
     
     return result
+
+def create_cyclical_features(df: pd.DataFrame, time_features: list) -> pd.DataFrame:
+    """
+    Create sine and cosine features for cyclical time features
+    
+    Args:
+        df: DataFrame with MultiIndex (level 0: group, level 1: timestamp)
+        time_features: List of time features to create cyclical features for.
+                        Valid options: ['dayofyear', 'weekofyear', 'month', 'quarter', 'dayofweek']
+    
+    Returns:
+        DataFrame with added sine and cosine features
+    """
+    result = df.copy()
+    timestamp = pd.DatetimeIndex(result.index.get_level_values(1))
+    
+    # Define max values for each cycle
+    max_values = {
+        'dayofyear': 366,  # Account for leap years
+        'weekofyear': 53,  # ISO calendar can have 53 weeks
+        'month': 12,
+        'quarter': 4,
+        'dayofweek': 7
+    }
+    
+    # Define functions to extract each feature
+    feature_extractors = {
+        'dayofyear': lambda x: x.dayofyear,
+        'weekofyear': lambda x: x.isocalendar().week,
+        'month': lambda x: x.month,
+        'quarter': lambda x: x.quarter,
+        'dayofweek': lambda x: x.dayofweek
+    }
+    
+    for feature in time_features:
+        if feature in max_values:
+            # Extract the time feature
+            values = feature_extractors[feature](timestamp)
+            max_value = max_values[feature]
+            
+            # Calculate sine and cosine features
+            result.loc[:, f'{feature}_sin'] = pd.Series(np.sin(2 * np.pi * values / max_value)).astype(float).values
+            result.loc[:, f'{feature}_cos'] = pd.Series(np.cos(2 * np.pi * values / max_value)).astype(float).values
+    
+    return result
