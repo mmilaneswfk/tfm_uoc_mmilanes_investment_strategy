@@ -13,8 +13,8 @@ time_constants:
 start_year: 2000
 interval: '1wk'
 outlier_cutoff: 0.01
-normalize: True
-neutralize: False
+normalize: true
+neutralize: true
 excess_return: True
 check_nulls_data: True
 
