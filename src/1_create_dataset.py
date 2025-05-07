@@ -126,12 +126,24 @@ print("Configuration and ETF prices successfully read.")
 #%% Create a new dataframe for returns
 returns = pd.DataFrame()
 
+# for lag in lag_list:
+#     returns[f'return_{lag}'] = (
+#         (prices
+#          .pct_change(periods=lag)
+#          .stack(future_stack=True)
+#          .pipe(lambda x: x.clip(lower=float(x.quantile(outlier_cutoff)),
+#                        upper=float(x.quantile(1-outlier_cutoff))))
+#          + 1)
+#         .pow(1/lag)
+#         .sub(1)
+#     )
+
 for lag in lag_list:
     returns[f'return_{lag}'] = (
         (prices
          .pct_change(periods=lag)
          .stack(future_stack=True)
-         .pipe(lambda x: x.clip(lower=float(x.quantile(outlier_cutoff)),
+         .groupby(level='ticker').transform(lambda x: x.clip(lower=float(x.quantile(outlier_cutoff)),
                        upper=float(x.quantile(1-outlier_cutoff))))
          + 1)
         .pow(1/lag)
@@ -188,16 +200,28 @@ if excess_return:
     # Create a new dataframe for SPY returns
     returns_spy = pd.DataFrame()
 
+    # for lag in lag_list:
+    #     returns_spy[f'return_{lag}'] = (
+    #         (spy_prices
+    #             .pct_change(periods=lag)
+    #             .pipe(lambda x: x.clip(lower=float(x.quantile(outlier_cutoff)),
+    #                                   upper=float(x.quantile(1-outlier_cutoff))))
+    #             + 1)
+    #         .pow(1/lag)
+    #         .sub(1)
+    #     )
     for lag in lag_list:
         returns_spy[f'return_{lag}'] = (
             (spy_prices
                 .pct_change(periods=lag)
-                .pipe(lambda x: x.clip(lower=float(x.quantile(outlier_cutoff)),
-                                      upper=float(x.quantile(1-outlier_cutoff))))
+                .groupby(level='ticker').transform(lambda x: x.clip(lower=float(x.quantile(outlier_cutoff)),
+                            upper=float(x.quantile(1-outlier_cutoff))))
                 + 1)
             .pow(1/lag)
             .sub(1)
         )
+
+                 
 
     # Drop rows with NaN values that result from the lag calculation
     returns_spy = returns_spy.dropna()

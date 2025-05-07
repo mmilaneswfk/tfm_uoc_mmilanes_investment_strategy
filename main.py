@@ -20,18 +20,18 @@ def main():
 
     # Execute the dataset creation script only when BUIL_DATASET is true
     if BUILD_DATASET:
-        subprocess.run([venv_python, "./src/create_dataset.py"], check=True)
+        subprocess.run([venv_python, "./src/1_create_dataset.py"], check=True)
     else:
         print("Dataset creation skipped.")
     
     # Execute the first script using the venv Python
     if BUILD_MODEL:
-        subprocess.run([venv_python, "./src/classification_modeling_single.py"], check=True)
+        subprocess.run([venv_python, "./src/2_modeling.py"], check=True)
     else:
         print("Model building skipped.")
     
     # Execute the second script using the venv Python
-    subprocess.run([venv_python, "./src/classification_backtesting_single.py"], check=True)
+    subprocess.run([venv_python, "./src/3_backtesting.py"], check=True)
 
 if __name__ == "__main__":
     main()

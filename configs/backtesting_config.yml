@@ -10,12 +10,12 @@ incremental_training: True
 retrain_model: True
 YEAR: 52
 TARGET_THRESHOLD: 0
-YEARS_TRAIN: 8
-WEEKS_TEST: 1
-CV_SPLITS: 30
-CV_PURGE: 3
-COVID_FILTER: True
-USE_RETURN_AS_WEIGHT: true
+YEARS_TRAIN: 10
+WEEKS_TEST: 4
+CV_SPLITS: 10
+CV_PURGE: 2
+COVID_FILTER: true
+USE_RETURN_AS_WEIGHT: false
 
 # Model Fixed Parameters
 model_params:
@@ -24,12 +24,11 @@ model_params:
   metric: average_precision_score
   boosting_type: rf
   extra_trees : true
-  # use_quantized_grad : true
-  # num_grad_quant_bins: 20
+
   verbose: -1
 
 # Backtesting configuration
-backtest_start_date: 2022-01-01
+backtest_start_date: 2021-01-01
 backtest_end_date: 2024-10-22 # Doesn't work if to_date is True
 backtest_to_date: True
 backtest_frequency: 1w
@@ -38,3 +37,8 @@ backtest_frequency: 1w
 CATEGORICAL_FEATURES:
   - 'sector'
   - 'weekofyear'
+
+
+ENABLE_OPTIMIZATION: false
+OPTIMIZATION_TRIALS: 30
+
