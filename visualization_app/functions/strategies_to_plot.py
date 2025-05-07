@@ -36,6 +36,7 @@ def aggregate_strategies_for_plot(strategy_results, strategy_names, compute_cumu
 
     return pd.DataFrame(processed)
 
+
 def aggregate_lag_returns_for_plot(strategy_results, strategy_names, compute_cumulative=True, round_decimals=3):
     """
     Aggregates precomputed strategy returns for a specific lag period (default: 1) into a single DataFrame for plotting.

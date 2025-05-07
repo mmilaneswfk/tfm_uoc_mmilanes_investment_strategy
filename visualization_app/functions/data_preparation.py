@@ -6,6 +6,7 @@ import os
 
 @st.cache_data
 def load_data(base_path=".."):
+
     # Load prediction accuracy data
     valid = pd.read_csv(os.path.join(base_path, "output/prediction_accuracy.csv"), 
                        index_col=0, parse_dates=True)

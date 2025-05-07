@@ -9,6 +9,7 @@ lgbm_classification_model: tuning_lgb_classi_new.h5
 YEAR: 52
 TARGET_THRESHOLD: 0
 YEARS_TRAIN: 10
+
 WEEKS_TEST: 4
 CV_SPLITS: 20
 CV_PURGE: 2
@@ -29,6 +30,7 @@ COLUMNS_TO_KEEP:
   - 'month_sin'
   - 'weekofyear_cos'
   - 'weekofyear_sin'
+
 
 COLUMNS_TO_DROP:
 
@@ -80,3 +82,4 @@ CATEGORICAL_FEATURES:
   - 'weekofyear'
 
 OPTIMIZATION_TRIALS: 30
+
