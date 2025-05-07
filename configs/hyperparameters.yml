@@ -1,0 +1,17 @@
+HYPERPARAMETER_SPACE:
+  objective: ['binary']
+  is_unbalance: [true]
+  metric: ['average_precision_score']
+  boosting_type: ['rf']
+  extra_trees: [true]
+  lambda_l1: ['loguniform', 0.0001, 0.5]
+  lambda_l2: ['loguniform', 0.0001, 0.5]
+  max_depth: ['int', 10, 100]
+  n_estimators: ['int', 10, 100]
+  num_leaves: ['int', 10, 100]  # Uncommented num_leaves
+  learning_rate: ['loguniform', 0.001, 5.0]
+  #subsample: ['uniform', 0.6, 0.9]
+  colsample_bytree: ['uniform', 0.7, 0.9]
+  min_child_samples: ['int', 5, 30]
+  # scale_pos_weight: ['uniform', 0.1, 10.0]
+  verbose: [-1]
