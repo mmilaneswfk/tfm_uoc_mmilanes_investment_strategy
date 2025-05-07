@@ -11,8 +11,9 @@ import lightgbm as lgb
 from src.utils import MultipleTimeSeriesCV
 from src.functions.feature_engineering_functions import (create_lags, create_rolling_features, 
     create_momentum_features, create_time_features, 
-    create_time_encoding_rbf, simple_labelling,
-    create_diff, last_target_outcomes, create_cyclical_features)
+    create_time_encoding_rbf, simple_labeling,
+    create_diff, last_target_outcomes, create_cyclical_features,
+    std_labeling, labeling_selector)
 from src.functions.optimization_functions import purge_cv_folds, parse_hyperparameter_space, custom_logloss, average_precision_eval
 from src.functions.feature_selection_functions import BorutaShap
 from sklearn.metrics import roc_auc_score, average_precision_score
@@ -60,13 +61,19 @@ with open(config_path, 'r') as file:
     FAMA_FRENCH_FACTORS = config['FAMA_FRENCH_FACTORS']
 
     # Model and feature selection settings
-    HYPERPARAMETER_SPACE = config['HYPERPARAMETER_SPACE']
     OPTIMIZATION_TRIALS = config['OPTIMIZATION_TRIALS']
     COLUMNS_TO_KEEP = config['COLUMNS_TO_KEEP']
     COLUMNS_TO_DROP = config['COLUMNS_TO_DROP']
     USE_SELECTION_IF_AVAILABLE = config['USE_SELECTION_IF_AVAILABLE']
     KEEP_TIME_FEATURES = config['KEEP_TIME_FEATURES']
     USE_RETURN_AS_WEIGHT = config['USE_RETURN_AS_WEIGHT']
+
+config_hyper_path = os.path.join(os.path.dirname(os.path.abspath(__file__ if '__file__' in locals() else '')),
+                           '../configs/hyperparameters.yml')
+
+with open(config_hyper_path, 'r') as file:
+    config_hyper = yaml.safe_load(file)
+    HYPERPARAMETER_SPACE = config_hyper['HYPERPARAMETER_SPACE']
 
 idx = pd.IndexSlice
 
@@ -190,7 +197,8 @@ date_mask = ((X.index.get_level_values('date') >= CV_START_DATE) &
              (X.index.get_level_values('date') < VALIDATION_TIMESTAMP))
 
 # Apply binary labeling to target variable
-y = simple_labelling(y, TARGET_THRESHOLD)
+#y = simple_labeling(y, TARGET_THRESHOLD)
+y = labeling_selector(y, 'simple')
 
 # Create CV datasets with date filter
 X_cv = X.loc[date_mask]
@@ -212,6 +220,7 @@ if USE_SELECTION_IF_AVAILABLE:
     except Exception as e:
         print(f"Error loading saved features: {e}")
 
+
 if selected_features is None:
     print("Performing feature selection...")
     feature_selector = BorutaShap(model=lgb.LGBMClassifier(
@@ -227,12 +236,12 @@ if selected_features is None:
                                     extra_trees=HYPERPARAMETER_SPACE['extra_trees'][0],
                                     objective=HYPERPARAMETER_SPACE['objective'][0],
                                     metric=HYPERPARAMETER_SPACE['metric'][0],
-                                    learning_rate=0.5,
+                                    learning_rate=0.1,
                                     is_unbalance=HYPERPARAMETER_SPACE['is_unbalance'][0],
                                     verbose = -1,),
                         importance_measure='shap',
                         classification=True,
-                        percentile=85)
+                        percentile=90)
 
     # Fit the selector
     weights = weights_stacked.loc[X_cv.dropna().index].abs() if USE_RETURN_AS_WEIGHT else None
@@ -398,7 +407,7 @@ def objective(trial):
             params,
             dtrain,
             valid_sets=[dtest],
-            callbacks=[lgb.early_stopping(50, verbose=False)],
+            callbacks=[lgb.early_stopping(150, verbose=False)],
             feval=average_precision_eval  # Add fobj parameter for custom objective
         )
 
@@ -422,7 +431,7 @@ with pd.HDFStore(DATA_STORE) as store:
     store.put('best_params', pd.Series(best_params), format='table', data_columns=True)
 
 #%%
-# Create a sample using only the last 2 years of data
+# Create a sample using only the last years of data
 max_date = X_cv.index.get_level_values('date').max()
 train_years_ago = max_date - pd.DateOffset(years=YEARS_TRAIN)
 date_sample_filter = X_cv.index.get_level_values('date') >= train_years_ago

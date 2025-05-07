@@ -15,8 +15,8 @@ interval: '1wk'
 outlier_cutoff: 0.01
 normalize: true
 neutralize: true
-excess_return: True
-check_nulls_data: True
+excess_return: true
+check_nulls_data: true
 
 ticker_list:
   - XLE # Energy Select Sector SPDR Fund

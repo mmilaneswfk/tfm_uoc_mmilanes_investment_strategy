@@ -178,7 +178,7 @@ def create_diff(df: pd.DataFrame, diff_params: list) -> pd.DataFrame:
         )
     return result
 
-def simple_labelling(series: pd.Series, threshold: float = 0) -> pd.Series:
+def simple_labeling(series: pd.Series, threshold: float = 0) -> pd.Series:
     """
     Create binary labels based on whether values exceed a threshold
     
@@ -198,6 +198,53 @@ def simple_labelling(series: pd.Series, threshold: float = 0) -> pd.Series:
     
     return result
 
+def std_labeling(series: pd.Series) -> pd.Series:
+    """
+    Create binary labels based on whether values exceed the standard deviation
+    of values with the same timestamp
+    
+    Args:
+        series: Input series with MultiIndex (level 0: group, level 1: timestamp)
+    
+    Returns:
+        Series with binary labels (1 if value > std of same timestamp values, 0 otherwise, NaN if input is NaN)
+    """
+    # Create a result series initialized with NaN values
+    result = pd.Series(np.nan, index=series.index)
+    
+    # Calculate standard deviation for each timestamp
+    std_by_date = series.groupby(level=1).transform('std')
+    mean_by_date = series.groupby(level=1).transform('mean')
+
+    
+    # Apply the comparison only to non-null values
+    mask = series.notnull()
+    result[mask] = (series[mask] > std_by_date[mask] + mean_by_date[mask]).astype(int)
+    
+    return result
+
+def labeling_selector(series: pd.Series, label_type: str, **params) -> pd.Series:
+    """
+    Select and apply a labeling function based on the label_type
+    
+    Args:
+        series: Input series to be labeled
+        label_type: Type of labeling to apply ('simple' or 'std')
+        **params: Additional parameters to pass to the selected labeling function
+    
+    Returns:
+        Series with labels according to the selected labeling method
+    
+    Raises:
+        ValueError: If the label_type is not recognized
+    """
+    if label_type == 'simple':
+        return simple_labeling(series, **params)
+    elif label_type == 'std':
+        return std_labeling(series)
+    else:
+        raise ValueError(f"Unknown label_type: {label_type}. Valid options are 'simple' or 'std'.")
+
 def last_target_outcomes(df: pd.DataFrame, target_name: str, threshold: float = 0) -> pd.DataFrame:
     """
     Creates features based on past target outcomes
@@ -213,7 +260,7 @@ def last_target_outcomes(df: pd.DataFrame, target_name: str, threshold: float = 
     result = df.copy()
     
     # Create binary labels
-    result['target_binary'] = simple_labelling(result[target_name], threshold)
+    result['target_binary'] = simple_labeling(result[target_name], threshold)
     
     # Create lag of binary target
     result = create_lags(result, 'target_binary', [1,2,4,8,12,26,52], prefix = 'fe_target_last_')

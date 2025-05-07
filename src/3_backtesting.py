@@ -13,25 +13,23 @@ from scipy.stats import spearmanr
 from sklearn.metrics import roc_auc_score, average_precision_score
 from sklearn.calibration import CalibratedClassifierCV
 from src.utils import MultipleTimeSeriesCV
+from src.functions.optimization_functions import parse_hyperparameter_space, average_precision_eval, purge_cv_folds
 from src.functions.backtesting_functions import (
-    create_lgbm_dataset,
-    save_valid_dfs,
-    save_model,
-    save_feature_importances,
-    save_model_parameters,
-    save_prediction_accuracy,
-    save_categorical_info,
-    save_gains_analysis,
-    save_top_sector_analysis,
-    save_correlation_data,
-    save_prediction_proba_df,
-    extract_predictions_proba,
+    analyze_predictions_accuracy,
     analyze_top_sector_predictions,
     compare_predictions,
-    analyze_predictions_accuracy
+    create_lgbm_dataset,
+    extract_predictions_proba,
+    extract_predictions,
+    extract_true_labels,
+    save_categorical_info,
+    save_dataframe_to_csv,  # New merged function
+    save_model,
+    save_valid_dfs,
 )
-from src.functions.feature_engineering_functions import simple_labelling
+from src.functions.feature_engineering_functions import simple_labeling, labeling_selector, std_labeling
 from sklearn.metrics import accuracy_score
+from tqdm import tqdm
 
 config_path = os.path.join(os.path.dirname(os.path.abspath(__file__ if '__file__' in locals() else '')),
                            '../configs/backtesting_config.yml')
@@ -57,7 +55,14 @@ with open(config_path, 'r') as file:
     CV_PURGE = config['CV_PURGE']
     CATEGORICAL_FEATURES = config['CATEGORICAL_FEATURES']
     USE_RETURN_AS_WEIGHT = config['USE_RETURN_AS_WEIGHT']
+    ENABLE_OPTIMIZATION = config['ENABLE_OPTIMIZATION']
 
+config_hyper_path = os.path.join(os.path.dirname(os.path.abspath(__file__ if '__file__' in locals() else '')),
+                           '../configs/hyperparameters.yml')
+
+with open(config_hyper_path, 'r') as file:
+    config_hyper = yaml.safe_load(file)
+    HYPERPARAMETER_SPACE = config_hyper['HYPERPARAMETER_SPACE']
 
 DATA_STORE = os.path.join(os.path.dirname(os.path.abspath(__file__ if '__file__' in locals() else '')), 
                           DATA_STORE)
@@ -94,7 +99,7 @@ else:
 
 # Define COVID period dates (ensure consistency with modeling script, maybe load from config)
 COVID_START_DATE = pd.Timestamp('2020-02-20', tz='UTC')
-COVID_END_DATE = pd.Timestamp('2020-06-30', tz='UTC')
+COVID_END_DATE = pd.Timestamp('2020-07-30', tz='UTC')
 
 # Apply COVID filter if enabled in config
 if COVID_FILTER:
@@ -112,15 +117,7 @@ if COVID_FILTER:
     
     # Apply filter to sample_weights if they exist
     if sample_weights is not None:
-        # Ensure sample_weights index matches X before filtering
-        if not sample_weights.index.equals(X.index):
-             # Reindex weights to match the filtered X index (handles potential mismatches)
-             sample_weights = sample_weights.reindex(X.index)
-             # Note: Reindexing might introduce NaNs if weights were missing for some X rows. Handle as needed.
-        else:
-             # If indices already match (after filtering X/y), filter weights directly
-             sample_weights = sample_weights.loc[covid_mask]
-
+        sample_weights = sample_weights.loc[X.index]
 
     removed_rows = initial_rows - len(X)
     print(f"Removed {removed_rows} rows due to COVID filter.")
@@ -156,7 +153,8 @@ if CATEGORICAL_FEATURES != "auto":
 
 
 # Labeling
-y = simple_labelling(y, TARGET_THRESHOLD)
+#y = simple_labeling(y, TARGET_THRESHOLD)
+y = labeling_selector(y, 'simple')
 
 # Print summary of null values in y
 total_nulls = y.isna().sum()
@@ -172,12 +170,11 @@ inferred_freq = date_index.freqstr or pd.infer_freq(date_index) or backtest_freq
 
 # Compare the period of last_date to the current period
 last_period    = last_date.to_period(inferred_freq)
-current_period = pd.Timestamp.now(tz='UTC').to_period(inferred_freq)
 
-# Check if last_date is in current period and has nulls
+# Check if last date has nulls and remove if necessary
 nulls_last = int(null_by_date.get(last_date, 0))
-if last_period == current_period and nulls_last > 0:
-    print(f"Removing data for current period {current_period} due to {nulls_last} null target(s)")
+if nulls_last > 0:
+    print(f"Removing data for last date {last_date.date()} due to {nulls_last} null target(s)")
     # Drop rows where the date level equals last_date
     mask = date_index != last_date
     X = X[mask]
@@ -187,6 +184,8 @@ if use_best_params:
     model_params.update(best_params)
     model = lgb.LGBMClassifier(**model_params)
 else:
+    # Ensure feature_pre_filter is False in base model params to allow min_data_in_leaf changes
+    model_params['feature_pre_filter'] = False
     model = lgb.LGBMClassifier(
         random_state=42,
         n_estimators=100,
@@ -195,13 +194,13 @@ else:
         **model_params
     )
 
-# cv = MultipleTimeSeriesCV(
-#         n_splits=CV_SPLITS*CV_PURGE,
-#         train_period_length=YEAR * YEARS_TRAIN,
-#         test_period_length=WEEKS_TEST,
-#         lookahead=1,
-#         date_idx='date',
-#         shuffle=False)
+cv = MultipleTimeSeriesCV(
+        n_splits=CV_SPLITS*CV_PURGE,
+        train_period_length=YEAR * YEARS_TRAIN,
+        test_period_length=WEEKS_TEST,
+        lookahead=1,
+        date_idx='date',
+        shuffle=False)
 
 if backtest_to_date:
     backtest_end_date = datetime.datetime.now().strftime('%Y-%m-%d')
@@ -212,6 +211,8 @@ if backtest_to_date:
 
 
 #%% Data Preprocessing
+import optuna
+
 
 valid_results = []
 valid_df_saved = []
@@ -224,8 +225,10 @@ model_pre = None
 train_df_pre = None
 valid_df_pre = None
 
-for test_date in backtest_dates:
-    train_df, valid_df = create_lgbm_dataset(X, y,
+PERIODS_RECOMPUTE_PARAMS = len(backtest_dates) // 5
+
+for test_date in tqdm(backtest_dates, desc="Backtesting progress", unit="date"):
+    train_df, valid_df, X_test, y_test = create_lgbm_dataset(X, y,
                                             lookback_period=YEARS_TRAIN * 52,
                                             n_test_periods=WEEKS_TEST,
                                             end_date=test_date,
@@ -248,21 +251,21 @@ for test_date in backtest_dates:
                  categorical_feature=CATEGORICAL_FEATURES)
 
     # Make predictions
-    valid_pred = model.predict(valid_df.data)
-    valid_pred_proba = model.predict_proba(valid_df.data)[:, 1]
+    valid_pred = model.predict(X_test)
+    valid_pred_proba = model.predict_proba(X_test)[:, 1]
 
     if model_pre is not None:
         # Calibrate the model
         calibrator = CalibratedClassifierCV(model_pre,
-                                            method='sigmoid',
+                                            method='isotonic',
                                             cv='prefit') # Use prefit since model is already trained
 
         # Fit calibrator on the same training data used for the model in this iteration
         calibrator.fit(train_df_pre.data, train_df_pre.label)
 
         # Make calibrated predictions and probabilities
-        calibrator_pred = calibrator.predict(valid_df.data)
-        calibrator_pred_proba = calibrator.predict_proba(valid_df.data)[:, 1] # Get probability for the positive class
+        calibrator_pred = calibrator.predict(X_test)
+        calibrator_pred_proba = calibrator.predict_proba(X_test)[:, 1] # Get probability for the positive class
     else:
         # If no previous model, use the current model's predictions
         calibrator_pred = valid_pred
@@ -274,13 +277,13 @@ for test_date in backtest_dates:
     train_df_pre = copy.deepcopy(train_df)
     valid_df_pre = copy.deepcopy(valid_df)
     # Store results
-    if len(np.unique(valid_df.label)) == 1:
+    if len(np.unique(y_test)) == 1:
         # Handle cases where only one class is present in the validation set
         result = {
             'date': test_date,
             'predictions': valid_pred,
             'predictions_proba': valid_pred_proba,
-            'true_labels': valid_df.label.values,
+            'true_labels': y_test.values,
             'calibrator_predictions': calibrator_pred,
             'calibrator_predictions_proba': calibrator_pred_proba, # Added calibrated probabilities
             'validation_auc': np.nan, # Set to None when only one class is present
@@ -292,14 +295,68 @@ for test_date in backtest_dates:
             'date': test_date,
             'predictions': valid_pred,
             'predictions_proba': valid_pred_proba,
-            'true_labels': valid_df.label.values,
+            'true_labels': y_test.values,
             'calibrator_predictions': calibrator_pred,
             'calibrator_predictions_proba': calibrator_pred_proba, # Added calibrated probabilities
-            'validation_auc': roc_auc_score(valid_df.label, valid_pred_proba), # Use probabilities for AUC
-            'validation_ap': average_precision_score(valid_df.label, valid_pred_proba) # Use probabilities for AP
+            'validation_auc': roc_auc_score(y_test, valid_pred_proba), # Use probabilities for AUC
+            'validation_ap': average_precision_score(y_test, valid_pred_proba) # Use probabilities for AP
         }
     valid_results.append(result)
     valid_df_saved.append(valid_df)
+
+
+    # Check if it's time to recompute hyperparameters
+    if ENABLE_OPTIMIZATION and len(valid_results) > 0 and len(valid_results) % PERIODS_RECOMPUTE_PARAMS == 0:
+        CV_START_DATE = pd.Timestamp(test_date, tz='UTC') - pd.DateOffset(years=4*YEARS_TRAIN)
+
+        date_mask = ((X.index.get_level_values('date') >= CV_START_DATE) & 
+             (X.index.get_level_values('date') < pd.Timestamp(test_date, tz='UTC')))
+
+        # Create CV datasets with date filter
+        X_cv = X.loc[date_mask]
+        y_cv = y.loc[date_mask]
+        def objective(trial):
+            params = parse_hyperparameter_space(trial, HYPERPARAMETER_SPACE)
+            # Add objective parameter to use custom_logloss
+            fold_scores = []
+
+            for train_idx, test_idx in purge_cv_folds(cv.split(X_cv),CV_PURGE):
+                X_train, X_test = X_cv.iloc[train_idx], X_cv.iloc[test_idx]
+                y_train, y_test = y_cv.iloc[train_idx], y_cv.iloc[test_idx]
+
+                weights_train = sample_weights.loc[X_train.index].abs() if USE_RETURN_AS_WEIGHT else None
+                weights_test = sample_weights.loc[X_test.index].abs() if USE_RETURN_AS_WEIGHT else None
+
+                dtrain = lgb.Dataset(X_train, label=y_train,
+                                    categorical_feature = CATEGORICAL_FEATURES, weight=weights_train)
+                dtest = lgb.Dataset(X_test, label=y_test, reference=dtrain,
+                                    categorical_feature = CATEGORICAL_FEATURES, weight=weights_test)
+
+                bst = lgb.train(
+                    params,
+                    dtrain,
+                    valid_sets=[dtest],
+                    callbacks=[lgb.early_stopping(50, verbose=False)],
+                    feval=average_precision_eval,
+                    init_model = model 
+                )
+
+                # Compute metrics
+                preds = bst.predict(X_test, num_iteration=bst.best_iteration)
+                aps = average_precision_score(y_test, preds)
+                fold_scores.append(aps)
+
+
+            return np.mean(fold_scores)
+
+        study = optuna.create_study(direction='maximize')
+        study.enqueue_trial(model_params)
+        # We need to pass the train and validation datasets to the objective function
+        study.optimize(objective, n_trials=10, show_progress_bar=True)
+        best_params = study.best_params
+        model_params.update(best_params)
+        model = lgb.LGBMClassifier(**model_params)
+        print(f"Updated model parameters: {model_params}")
 
 # Concatenate valid_df_saved datasets
 concatenated_valid_df = lgb.Dataset(
@@ -325,6 +382,13 @@ prediction_accuracy_df_calibrated = analyze_predictions_accuracy(valid_results, 
 # Localize the index timezone to UTC for consistency
 prediction_accuracy_df.index = prediction_accuracy_df.index.tz_localize('UTC')
 prediction_accuracy_df_calibrated.index = prediction_accuracy_df_calibrated.index.tz_localize('UTC')
+
+# Extract true labels for each sector
+true_labels_df = extract_true_labels(valid_results, sectors)
+
+# Extract plain predictions for each sector
+prediction_df = extract_predictions(valid_results, sectors)
+calibrator_prediction_df = extract_predictions(valid_results, sectors, calibrator=True)
 
 # Extract prediction probabilities for each sector
 prediction_proba_df = extract_predictions_proba(valid_results, sectors)
@@ -392,22 +456,83 @@ correlation_data = pd.DataFrame(sector_corrs)
 
 
 # Save the correlation_data dataframe
-correlation_data_path = save_correlation_data(correlation_data, config_path)
+correlation_data_path = save_dataframe_to_csv(correlation_data, config_path, "correlation_data.csv")
 
 # %% Saving results
 # Call the function to save valid DataFrames
 valid_df_path = save_valid_dfs(valid_df_saved, X, config_path)
 
-top_sector_path = save_top_sector_analysis(top_sector_analysis, config_path)
-gains_path = save_gains_analysis(total_gains, potential_gains, config_path)
+# Save top sector analysis
+top_sector_path = save_dataframe_to_csv(top_sector_analysis, config_path, "top_sector_analysis.csv")
 
-# Execute saving functions
+# Save gains analysis
+gains_path = save_dataframe_to_csv(
+    {"total_gains": total_gains, "potential_gains": potential_gains},
+    config_path, 
+    "gains_analysis.csv"
+)
+
+# Save model
 model_path = save_model(model, config_path)
-importance_path = save_feature_importances(model, X, config_path)
-params_path = save_model_parameters(model, config_path)
-accuracy_path, calibrated_accuracy_path = save_prediction_accuracy(prediction_accuracy_df, prediction_accuracy_df_calibrated, config_path)
+
+# Save feature importances
+importance_path = save_dataframe_to_csv(
+    pd.DataFrame({
+        'feature': X.columns,
+        'importance': model.feature_importances_
+    }).sort_values('importance', ascending=False),
+    config_path,
+    "feature_importances.csv",
+    index=False
+)
+
+# Save model parameters
+params_path = save_dataframe_to_csv(
+    pd.DataFrame.from_dict(model.get_params(), orient='index', columns=['value']),
+    config_path,
+    "model_parameters.csv"
+)
+
+# Save prediction accuracy
+accuracy_paths = save_dataframe_to_csv(
+    {
+        "original": prediction_accuracy_df,
+        "calibrated": prediction_accuracy_df_calibrated
+    },
+    config_path,
+    {
+        "original": "prediction_accuracy.csv",
+        "calibrated": "prediction_accuracy_calibrated.csv"
+    }
+)
+
+# Save categorical info
 cat_info_path = save_categorical_info(CATEGORICAL_FEATURES if CATEGORICAL_FEATURES != "auto" else [], valid_df_path)
 
-# call the saver
-prediction_proba_path = save_prediction_proba_df(prediction_proba_df, config_path)
-calibrator_prediction_proba_path = save_prediction_proba_df(calibrator_prediction_proba_df, config_path, calibrator=True)
+# Save plain predictions
+prediction_paths = save_dataframe_to_csv(
+    {
+        "model": prediction_df,
+        "calibrator": calibrator_prediction_df,
+        "true_labels": true_labels_df
+    },
+    config_path,
+    {
+        "model": "model_predictions.csv",
+        "calibrator": "calibrator_predictions.csv",
+        "true_labels": "true_labels.csv"
+    }
+)
+
+# Save prediction probabilities
+proba_paths = save_dataframe_to_csv(
+    {
+        "original": prediction_proba_df,
+        "calibrated": calibrator_prediction_proba_df
+    },
+    config_path,
+    {
+        "original": "prediction_proba.csv",
+        "calibrated": "calibrator_prediction_proba.csv"
+    }
+)
