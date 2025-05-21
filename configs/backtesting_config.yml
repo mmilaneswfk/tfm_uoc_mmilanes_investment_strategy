@@ -6,12 +6,13 @@ TARGET_NAME: target_1
 
 # Model Behavior
 use_best_params: True
-incremental_training: True
+incremental_training: False
 retrain_model: True
 YEAR: 52
 TARGET_THRESHOLD: 0
-YEARS_TRAIN: 10
-WEEKS_TEST: 4
+YEARS_TRAIN: 4
+WEEKS_TEST: 1
+WEEKS_VALIDATION: 2
 CV_SPLITS: 10
 CV_PURGE: 2
 COVID_FILTER: true
@@ -22,8 +23,10 @@ model_params:
   objective: binary
   is_unbalance: true
   metric: average_precision_score
-  boosting_type: rf
+  boosting_type: gbdt
   extra_trees : true
+  # use_quantized_grad: true
+  # num_grad_quant_bins : 6
 
   verbose: -1
 
@@ -39,6 +42,6 @@ CATEGORICAL_FEATURES:
   - 'weekofyear'
 
 
-ENABLE_OPTIMIZATION: false
+ENABLE_OPTIMIZATION: true
 OPTIMIZATION_TRIALS: 30
 

@@ -1,6 +1,10 @@
 # Data Store Configuration
 DATA_STORE: ../data/assets.h5
 
+
+DOWNLOAD_YFINANCE: true
+YFINANCE_TEMP: ../data/y_finance_data.parquet
+
 # Time-related constants
 time_constants:
   WEEKS_PER_YEAR: 52
@@ -14,9 +18,11 @@ start_year: 2000
 interval: '1wk'
 outlier_cutoff: 0.01
 normalize: true
-neutralize: true
+neutralize: false
 excess_return: true
 check_nulls_data: true
+chunk_size: 3
+chunk_delay_seconds: 10
 
 ticker_list:
   - XLE # Energy Select Sector SPDR Fund

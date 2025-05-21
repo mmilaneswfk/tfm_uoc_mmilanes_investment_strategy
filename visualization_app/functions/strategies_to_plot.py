@@ -97,13 +97,13 @@ def sp500_benchmark(returns_spy, reference_index, **kwargs):
     """S&P 500 benchmark strategy."""
     return returns_spy.loc[reference_index]
 
-def average_sector_strategy(target, **kwargs):
+def average_sector_strategy(target_df, **kwargs):
     """
     Strategy that equally weights investment across all sectors.
     
     Parameters:
     -----------
-    target : pandas.DataFrame
+    target_df : pandas.DataFrame
         DataFrame with dates as index and sectors as columns containing returns.
     **kwargs : dict
         Additional keyword arguments (not used but included for consistency).
@@ -114,7 +114,7 @@ def average_sector_strategy(target, **kwargs):
         Average returns across all sectors for each date.
     """
     # Calculate mean across all sectors for each date
-    return target.mean(axis=1)
+    return target_df.mean(axis=1)
 
 
 def top_n_periodic_strategy(predicted_proba, target, N, valid=None, **kwargs):
@@ -151,8 +151,8 @@ def top_n_periodic_strategy(predicted_proba, target, N, valid=None, **kwargs):
         if not valid.index.equals(target.index) or not valid.columns.equals(target.columns):
             raise ValueError("valid must share the same index and columns as target")
         
-    predicted_proba = predicted_proba.shift(1, freq = 'W-SUN').iloc[:-1]
-    valid = valid.shift(1, freq = 'W-SUN').iloc[:-1]
+    # predicted_proba = predicted_proba.shift(1, freq = 'W-SUN').iloc[:-1]
+    # valid = valid.shift(1, freq = 'W-SUN').iloc[:-1]
 
     daily_returns = []
     dates = predicted_proba.index

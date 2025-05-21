@@ -81,6 +81,38 @@ def create_momentum_features(df: pd.DataFrame, momentum_params: list) -> pd.Data
     
     return result
 
+def create_cross_sectional_feature(df: pd.DataFrame, column: str, agg_func: str, lag: int, prefix: str = '') -> pd.DataFrame:
+    """
+    Create a feature that aggregates values across all groups for each timestamp,
+    then shifts the result by a specified lag
+    
+    Args:
+        df: DataFrame with MultiIndex (level 0: group, level 1: timestamp)
+        column: Column name to aggregate
+        agg_func: Aggregation function ('mean', 'std', 'min', 'max', etc.)
+        lag: Number of periods to shift the result
+        prefix: Optional prefix for the column name (default: '')
+    
+    Returns:
+        DataFrame with added cross-sectional feature
+    """
+    result = df.copy()
+    
+    # Calculate the aggregation by date (level 1)
+    cross_sectional_agg = df.groupby(level=1)[column].agg(agg_func)
+    
+    # Create feature name
+    feature_name = f'{prefix}cross_sect_{agg_func}_{lag}'
+    
+    # Map the aggregated values back to the DataFrame
+    # This will assign the same value to all groups with the same timestamp
+    result[feature_name] = result.index.get_level_values(1).map(cross_sectional_agg)
+    
+    # Shift the values by the specified lag within each group
+    result[feature_name] = result.groupby(level=0)[feature_name].shift(lag)
+    
+    return result
+
 def create_time_features(df: pd.DataFrame, features: list) -> pd.DataFrame:
     """
     Create time-based features from the timestamp in level 1 of the index

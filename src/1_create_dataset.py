@@ -8,6 +8,7 @@ import yaml
 from statsmodels.regression.rolling import RollingOLS
 import os
 import warnings
+import time
 import statsmodels.api as sm
 
 warnings.filterwarnings('ignore')
@@ -29,7 +30,7 @@ with open(config_path, 'r') as file:
     
     # Calculate derived constants
     MIN_ENTRIES = WEEKS_PER_YEAR * YEARS_FOR_TICKER_VALIDITY
-    ROLLING_WINDOW_SIZE = WEEKS_PER_YEAR
+    ROLLING_WINDOW_SIZE = WEEKS_PER_YEAR * YEARS_FOR_ROLLING_WINDOW
     ROLLING_BETA_WINDOW = WEEKS_PER_MONTH * YEARS_FOR_ROLLING_WINDOW * 12  # 2 years in weeks
     
     # Load other configuration items
@@ -51,21 +52,62 @@ with open(config_path, 'r') as file:
     columns_to_drop = config['columns_to_drop']
     fred_shifts = config['fred_shifts']
     CHECK_NULLS_DATA = config['check_nulls_data']
+    chunk_size = config['chunk_size']
+    chunk_delay_seconds = config['chunk_delay_seconds']
+    DOWNLOAD_YFINANCE = config['DOWNLOAD_YFINANCE']
+    YFINANCE_TEMP = config['YFINANCE_TEMP']
 
 
 # Download data using yfinance
-data = (
-    yf.download(
-        # Pass the ticker list
-        tickers=ticker_list,
-        # Group data by ticker
-        group_by='ticker',
-        # Add "Adj. Close" column
-        auto_adjust=False,
-        interval = INTERVAL,
-        start = START
-    ))
+# Check if we should download data or read from parquet
+if DOWNLOAD_YFINANCE:
+    data = None
 
+    # Process tickers in chunks
+    for i in range(0, len(ticker_list), chunk_size):
+        chunk_tickers = ticker_list[i:i+chunk_size]
+        
+        print(f"Downloading data for tickers {i+1}-{min(i+chunk_size, len(ticker_list))} of {len(ticker_list)}")
+        
+        chunk_data = yf.download(
+            tickers=chunk_tickers,
+            group_by='ticker',
+            auto_adjust=False,
+            interval=INTERVAL,
+            start=START,
+            threads=False
+        )
+        
+        # Handle single ticker case
+        if len(chunk_tickers) == 1 and not isinstance(chunk_data.columns, pd.MultiIndex):
+            ticker = chunk_tickers[0]
+            chunk_data.columns = pd.MultiIndex.from_product([[ticker], chunk_data.columns])
+        
+        # Combine with previous data
+        if data is None:
+            data = chunk_data
+        else:
+            data = pd.concat([data, chunk_data], axis=1)
+        
+        # Wait before the next chunk (if not the last one)
+        if i + chunk_size < len(ticker_list) and chunk_delay_seconds > 0:
+            print(f"Waiting {chunk_delay_seconds} seconds before next chunk...")
+            time.sleep(chunk_delay_seconds)
+    
+    # Save data to parquet
+    parquet_path = os.path.join(os.path.dirname(__file__), YFINANCE_TEMP)
+    data.to_parquet(parquet_path)
+    print(f"Data saved to {parquet_path}")
+else:
+    # Try to read from parquet file
+    parquet_path = os.path.join(os.path.dirname(__file__), YFINANCE_TEMP)
+    if os.path.exists(parquet_path):
+        data = pd.read_parquet(parquet_path)
+        print(f"Data loaded from {parquet_path}")
+    else:
+        raise FileNotFoundError(f"Parquet file {parquet_path} not found. Set DOWNLOAD_YFINANCE to True to download data.")
+
+#%%
 # Check for missing values in the last 5 weeks of close data
 if CHECK_NULLS_DATA:
     # Get the last 5 weeks of data
@@ -126,17 +168,6 @@ print("Configuration and ETF prices successfully read.")
 #%% Create a new dataframe for returns
 returns = pd.DataFrame()
 
-# for lag in lag_list:
-#     returns[f'return_{lag}'] = (
-#         (prices
-#          .pct_change(periods=lag)
-#          .stack(future_stack=True)
-#          .pipe(lambda x: x.clip(lower=float(x.quantile(outlier_cutoff)),
-#                        upper=float(x.quantile(1-outlier_cutoff))))
-#          + 1)
-#         .pow(1/lag)
-#         .sub(1)
-#     )
 
 for lag in lag_list:
     returns[f'return_{lag}'] = (
@@ -179,63 +210,82 @@ def normalize_by_rolling_std(series, window=ROLLING_WINDOW_SIZE, min_periods=MIN
 def neutralize(group):
     return (group - group.mean()) / group.std()
 
-# Neutralize the returns if the neutralize flag is set in the configuration
-if neutralize:
-    returns = (
-        returns
-        .groupby(level='ticker')
-        .transform(neutralize)
-    )
-    
-# Normalize the returns if the normalize flag is set in the configuration
-if normalize:
-    returns = (
-        returns
-        .groupby(level='ticker')
-        .transform(normalize_by_rolling_std)
-        .dropna()
-    )
-
 if excess_return:
     # Create a new dataframe for SPY returns
     returns_spy = pd.DataFrame()
 
-    # for lag in lag_list:
-    #     returns_spy[f'return_{lag}'] = (
-    #         (spy_prices
-    #             .pct_change(periods=lag)
-    #             .pipe(lambda x: x.clip(lower=float(x.quantile(outlier_cutoff)),
-    #                                   upper=float(x.quantile(1-outlier_cutoff))))
-    #             + 1)
-    #         .pow(1/lag)
-    #         .sub(1)
-    #     )
     for lag in lag_list:
         returns_spy[f'return_{lag}'] = (
             (spy_prices
                 .pct_change(periods=lag)
-                .groupby(level='ticker').transform(lambda x: x.clip(lower=float(x.quantile(outlier_cutoff)),
+                .transform(lambda x: x.clip(lower=float(x.quantile(outlier_cutoff)),
                             upper=float(x.quantile(1-outlier_cutoff))))
                 + 1)
             .pow(1/lag)
             .sub(1)
         )
-
-                 
+  
 
     # Drop rows with NaN values that result from the lag calculation
     returns_spy = returns_spy.dropna()
     returns_spy_raw = returns_spy.copy()
 
-    # Normalize the SPY returns if the normalize flag is set in the configuration
-    if normalize:
-        returns_spy = normalize_by_rolling_std(returns_spy).dropna()
-
-    # Neutralize the SPY returns if the neutralize flag is set in the configuration
-    if neutralize:
-        returns_spy = neutralize(returns_spy)
-
     returns = returns.sub(returns_spy)
+
+# Normalize the returns if the normalize flag is set in the configuration
+if normalize:
+    normalized_returns = pd.DataFrame(index=returns.index)
+    for col in returns.columns:
+        normalized_returns[col] = (
+            returns[col]
+            .groupby(level='ticker')
+            .transform(lambda x: normalize_by_rolling_std(x))
+        )
+    returns = normalized_returns.dropna()
+
+# Neutralize the returns if the neutralize flag is set in the configuration
+if neutralize:
+    neutralized_returns = pd.DataFrame(index=returns.index)
+    for col in returns.columns:
+        neutralized_returns[col] = (
+            returns[col]
+            .groupby(level='date')
+            .transform(neutralize)
+        )
+    returns = neutralized_returns
+
+# if excess_return:
+#     # Create a new dataframe for SPY returns
+#     returns_spy = pd.DataFrame()
+
+#     for lag in lag_list:
+#         returns_spy[f'return_{lag}'] = (
+#             (spy_prices
+#                 .pct_change(periods=lag)
+#                 .transform(lambda x: x.clip(lower=float(x.quantile(outlier_cutoff)),
+#                             upper=float(x.quantile(1-outlier_cutoff))))
+#                 + 1)
+#             .pow(1/lag)
+#             .sub(1)
+#         )
+  
+
+#     # Drop rows with NaN values that result from the lag calculation
+#     returns_spy = returns_spy.dropna()
+#     returns_spy_raw = returns_spy.copy()
+
+#     # Normalize the SPY returns if the normalize flag is set in the configuration
+#     if normalize:
+#         normalized_spy_returns = pd.DataFrame(index=returns_spy.index)
+#         for col in returns_spy.columns:
+#             normalized_spy_returns[col] = normalize_by_rolling_std(returns_spy[col])
+#         returns_spy = normalized_spy_returns.dropna()
+
+#     # # Neutralize the SPY returns if the neutralize flag is set in the configuration
+#     # if neutralize:
+#     #     returns_spy = neutralize(returns_spy)
+
+#     returns = returns.sub(returns_spy)
 
 returns_spy.to_csv(os.path.join(os.path.dirname(os.path.abspath(__file__ if '__file__' in locals() else '')),
                                         '../output/returns_spy.csv'), index=True)
