@@ -106,20 +106,25 @@ def create_lgbm_dataset(X: pd.DataFrame,
 
 def extract_predictions(valid_results: List[Dict], 
                         sectors: List[str], 
-                        calibrator: bool = False) -> pd.DataFrame:
+                        prediction_type: str = "normal") -> pd.DataFrame:
     """
     Build a DataFrame of plain predictions for each sector/date.
 
     Args:
         valid_results: List of dicts returned in the backtest loop
         sectors: List of sector names in the same order as model inputs
-        calibrator: If True, extract calibrated predictions
+        prediction_type: Type of predictions to extract ("normal", "calibrator", or "meta")
 
     Returns:
         DataFrame with plain predictions for each sector and date
     """
-    # Determine the key for predictions based on whether calibrator is used
-    pred_key = 'calibrator_predictions' if calibrator else 'predictions'
+    # Determine the key for predictions based on the prediction type
+    if prediction_type == "calibrator":
+        pred_key = 'calibrator_predictions'
+    elif prediction_type == "meta":
+        pred_key = 'meta_predictions'
+    else:  # "normal" is the default
+        pred_key = 'predictions'
 
     # Collect dates and prediction arrays
     dates = [x['date'] for x in valid_results]
@@ -135,21 +140,28 @@ def extract_predictions(valid_results: List[Dict],
 
 def extract_predictions_proba(valid_results: List[Dict], 
                              sectors: List[str], 
-                             calibrator: bool = False) -> pd.DataFrame:
+                             prediction_type: str = "normal") -> pd.DataFrame:
     """
     Build a DataFrame of predicted probabilities for each sector/date.
 
     Args:
         valid_results: List of dicts returned in the backtest loop
         sectors: List of sector names in the same order as model inputs
-        calibrator: If True, extract calibrated probabilities
+        prediction_type: Type of probabilities to extract ("normal", "calibrator", or "meta")
 
     Returns:
         DataFrame with prediction probabilities for each sector and date
     """
+    # Determine the key for probabilities based on the prediction type
+    if prediction_type == "calibrator":
+        proba_key = 'calibrator_predictions_proba'
+    elif prediction_type == "meta":
+        proba_key = 'meta_predictions_proba'
+    else:  # "normal" is the default
+        proba_key = 'predictions_proba'
+
     # Collect dates and probability arrays
     dates = [x['date'] for x in valid_results]
-    proba_key = 'calibrator_predictions_proba' if calibrator else 'predictions_proba'
     proba = np.vstack([x[proba_key] for x in valid_results])
 
     # Build DataFrame
@@ -189,20 +201,27 @@ def extract_true_labels(valid_results: List[Dict], sectors: List[str]) -> pd.Dat
 
 def analyze_predictions_accuracy(valid_results: List[Dict], 
                                 sectors: Optional[List[str]] = None, 
-                                calibrated: bool = False) -> pd.DataFrame:
+                                prediction_type: str = "normal") -> pd.DataFrame:
     """
     Scores prediction accuracy: +1 for true positives, -1 for false positives, 0 otherwise.
     
     Args:
         valid_results: List of backtest results
         sectors: List of sector names for columns
-        calibrated: Whether to use calibrated predictions
+        prediction_type: Type of predictions to analyze ("normal", "calibrator", or "meta")
         
     Returns:
         DataFrame with scores by date and sector
     """
+    # Determine prediction key based on prediction type
+    if prediction_type == "calibrator":
+        pred_key = 'calibrator_predictions'
+    elif prediction_type == "meta":
+        pred_key = 'meta_predictions'
+    else:  # default to normal predictions
+        pred_key = 'predictions'
+    
     # Get predictions and true values
-    pred_key = 'calibrator_predictions' if calibrated else 'predictions'
     pred_array = np.array([x[pred_key] for x in valid_results], dtype=bool)
     true_array = np.array([x['true_labels'] for x in valid_results], dtype=bool)
     dates = np.array([x['date'] for x in valid_results])
@@ -628,4 +647,63 @@ def save_dataframe_to_csv(
         return result_paths
     
     else:
-        raise TypeError("Data must be a DataFrame, Series, or dictionary of DataFrames/Series")
+        raise TypeError("Data must be a DataFrame, Series, or dictionary of DataFrames/Series")    
+
+def create_refined_hyperparameter_space(
+    hyperparameter_space: Dict, 
+    best_params: Dict, 
+    variation_percent: float = 20.0
+) -> Dict:
+    """
+    Creates a refined hyperparameter space centered around the best parameters.
+    
+    Args:
+        hyperparameter_space: Original hyperparameter space dictionary
+        best_params: Dictionary of best parameters found in optimization
+        variation_percent: Percentage of variation around best parameters (default: 20.0)
+    
+    Returns:
+        A new hyperparameter space dictionary with ranges centered around best parameters
+    """
+    refined_space = {}
+    
+    for param_name, param_config in hyperparameter_space.items():
+        # If param has a single value or isn't in best_params, keep it as is
+        if len(param_config) == 1 or param_name not in best_params:
+            refined_space[param_name] = param_config
+            continue
+            
+        # Get the best value for this parameter
+        best_value = best_params[param_name]
+        
+        # Get the distribution type and original bounds
+        distribution_type = param_config[0]
+        orig_min = param_config[1]
+        orig_max = param_config[2]
+        
+        if distribution_type == 'uniform':
+            # For uniform, apply percentage variation directly
+            variation = best_value * (variation_percent / 100.0)
+            new_min = max(best_value - variation, orig_min)
+            new_max = min(best_value + variation, orig_max)
+            refined_space[param_name] = [distribution_type, new_min, new_max]
+            
+        elif distribution_type == 'loguniform':
+            # For loguniform, use a multiplicative factor for variation
+            factor = 1 + (variation_percent / 100.0)
+            new_min = max(best_value / factor, orig_min)
+            new_max = min(best_value * factor, orig_max)
+            refined_space[param_name] = [distribution_type, new_min, new_max]
+            
+        elif distribution_type == 'int':
+            # For integers, ensure the values are integers
+            variation = round(best_value * (variation_percent / 100.0))
+            new_min = max(int(best_value - variation), orig_min)
+            new_max = min(int(best_value + variation), orig_max)
+            refined_space[param_name] = [distribution_type, new_min, new_max]
+            
+        else:
+            # For other distribution types, keep original config
+            refined_space[param_name] = param_config
+    
+    return refined_space

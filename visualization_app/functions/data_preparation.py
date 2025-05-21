@@ -9,25 +9,34 @@ def load_data(base_path=".."):
 
     # Load prediction accuracy data
     valid = pd.read_csv(os.path.join(base_path, "output/prediction_accuracy.csv"), 
-                       index_col=0, parse_dates=True)
+                       index_col=0, parse_dates=True).shift(1).dropna(how='all')
     valid_calibrated = pd.read_csv(os.path.join(base_path, "output/prediction_accuracy_calibrated.csv"), 
-                                  index_col=0, parse_dates=True)
+                                  index_col=0, parse_dates=True).shift(1).dropna(how='all')
+    
+    valid_meta = pd.read_csv(os.path.join(base_path, "output/prediction_accuracy_meta.csv"), 
+                           index_col=0, parse_dates=True).shift(1).dropna(how='all')
     
     # Load prediction probabilities
     predicted_proba = pd.read_csv(os.path.join(base_path, "output/prediction_proba.csv"),
-                                 index_col=0, parse_dates=True)
+                                 index_col=0, parse_dates=True).shift(1).dropna(how='all')
     calibrator_predicted_proba = pd.read_csv(os.path.join(base_path, "output/calibrator_prediction_proba.csv"),
-                                           index_col=0, parse_dates=True)
+                                           index_col=0, parse_dates=True).shift(1).dropna(how='all')
+    meta_predicted_proba = pd.read_csv(os.path.join(base_path, "output/meta_prediction_proba.csv"),
+                                    index_col=0, parse_dates=True).shift(1).dropna(how='all')
     
     # Load model predictions
     predictions = pd.read_csv(os.path.join(base_path, "output/model_predictions.csv"), 
-                             index_col=0, parse_dates=True)
+                             index_col=0, parse_dates=True).shift(1).dropna(how='all')
     calibrator_predictions = pd.read_csv(os.path.join(base_path, "output/calibrator_predictions.csv"), 
-                                        index_col=0, parse_dates=True)
+                                        index_col=0, parse_dates=True).shift(1).dropna(how='all')
+
+    meta_predictions = pd.read_csv(os.path.join(base_path, "output/meta_predictions.csv"), 
+                                index_col=0, parse_dates=True).shift(1).dropna(how='all')
+
     
     # Load true labels data
     true_labels = pd.read_csv(os.path.join(base_path, "output/true_labels.csv"), 
-                            index_col=0, parse_dates=True)
+                            index_col=0, parse_dates=True).shift(1).dropna(how='all')
     
     # Load dataset components
     data = pd.read_csv(os.path.join(base_path, "output/valid_df_data.csv"))
@@ -46,9 +55,9 @@ def load_data(base_path=".."):
     
     # Load target and correlation data
     target = pd.read_csv(os.path.join(base_path, "output/target.csv"), 
-                        parse_dates=True, index_col=0)
+                        parse_dates=True, index_col=0).loc[true_labels.index]
     # Filter target to dates contained in valid index
-    target = target.loc[target.index.isin(valid.index)]
+    # target = target.loc[target.index.isin(valid.index)]
     
     correlation_data = pd.read_csv(os.path.join(base_path, "output/correlation_data.csv"), 
                                    index_col=0)
@@ -70,10 +79,11 @@ def load_data(base_path=".."):
         raw_spy = store['spy_raw'].sort_index()
         raw_spy = raw_spy['return_1']
     
-    return (valid, valid_calibrated, fi, params, valid_df, 
-            predicted_proba, predictions, calibrator_predictions,
+    return (valid, valid_calibrated, valid_meta, fi, params, valid_df, 
+            predicted_proba, predictions, calibrator_predictions, meta_predictions,
             target, correlation_data, raw_returns, raw_spy,
-            calibrator_predicted_proba, true_labels)
+            calibrator_predicted_proba, meta_predicted_proba, true_labels)
+
 
 @st.cache_resource
 def load_model(base_path=".."):

@@ -13,8 +13,8 @@ from src.functions.feature_engineering_functions import (create_lags, create_rol
     create_momentum_features, create_time_features, 
     create_time_encoding_rbf, simple_labeling,
     create_diff, last_target_outcomes, create_cyclical_features,
-    std_labeling, labeling_selector)
-from src.functions.optimization_functions import purge_cv_folds, parse_hyperparameter_space, custom_logloss, average_precision_eval
+    std_labeling, labeling_selector, create_cross_sectional_feature)
+from src.functions.optimization_functions import purge_cv_folds, parse_hyperparameter_space, custom_logloss, average_precision_eval, auc_feval
 from src.functions.feature_selection_functions import BorutaShap
 from sklearn.metrics import roc_auc_score, average_precision_score
 import datetime
@@ -26,7 +26,11 @@ from scipy.stats import spearmanr
 from itertools import combinations
 import random
 
-RANDOM_SEED = 42 # Set random seed for reproducibility
+RANDOM_SEED = 42  # Set random seed for reproducibility
+
+# Set random seeds for all libraries
+np.random.seed(RANDOM_SEED)
+random.seed(RANDOM_SEED)
 
 config_path = os.path.join(os.path.dirname(os.path.abspath(__file__ if '__file__' in locals() else '')),
                            '../configs/modeling_config.yml')
@@ -134,10 +138,12 @@ for col in FAMA_FRENCH_FACTORS:
 
 data = create_momentum_features(data, MOMENTUM)
 data = create_time_features(data, TIME_FEATURES.keys())
-data = create_time_encoding_rbf(data, TIME_FEATURES, 6)
+# data = create_time_encoding_rbf(data, TIME_FEATURES, 4)
 data = create_diff(data, DIFF)
 data = last_target_outcomes(data, TARGET_NAME, TARGET_THRESHOLD)
 data = create_cyclical_features(data, ['month', 'weekofyear'])
+data = create_cross_sectional_feature(data, TARGET_NAME, 'std', 1, 'fe')
+data = create_cross_sectional_feature(data, TARGET_NAME, 'mean', 1, 'fe')
 
 # Keep only columns with 'return' that contain 't-' followed by a number, or if they match TARGET_NAME
 data = data.loc[:, ~(data.columns.str.startswith('return') & 
@@ -225,23 +231,22 @@ if selected_features is None:
     print("Performing feature selection...")
     feature_selector = BorutaShap(model=lgb.LGBMClassifier(
                                     num_iterations=100,
-                                    n_estimators=200,
-                                    max_depth=150,
-                                    num_leaves=50,
-                                    subsample=0.8,
+                                    max_depth=8,
+                                    num_leaves=25,
+                                    subsample=0.7,
                                     colsample_bytree=0.8,
-                                    min_child_samples=60,
                                     force_col_wise = True,
                                     boosting_type=HYPERPARAMETER_SPACE['boosting_type'][0],
                                     extra_trees=HYPERPARAMETER_SPACE['extra_trees'][0],
                                     objective=HYPERPARAMETER_SPACE['objective'][0],
                                     metric=HYPERPARAMETER_SPACE['metric'][0],
-                                    learning_rate=0.1,
+                                    learning_rate=0.05,
                                     is_unbalance=HYPERPARAMETER_SPACE['is_unbalance'][0],
+                                    random_state=RANDOM_SEED,  # Add this
                                     verbose = -1,),
                         importance_measure='shap',
                         classification=True,
-                        percentile=90)
+                        percentile=80)
 
     # Fit the selector
     weights = weights_stacked.loc[X_cv.dropna().index].abs() if USE_RETURN_AS_WEIGHT else None
@@ -305,9 +310,13 @@ for i, feature_i in enumerate(selected_features):
         corr_value = corr_matrix.loc[feature_i, feature_j]
         if np.isnan(corr_value):
             continue
-        if corr_value > 0.7:
+        if corr_value > 0.8:
             print(f"  High correlation ({corr_value:.2f}): keeping '{feature_i}', removing '{feature_j}'")
             features_to_remove.add(feature_j)
+
+if KEEP_TIME_FEATURES:
+    # Remove time-related features from the list of features to remove
+    features_to_remove = [f for f in features_to_remove if f not in time_features]
 
 if features_to_remove:
     print(f"Removing {len(features_to_remove)} highly correlated features")
@@ -388,6 +397,8 @@ cv = MultipleTimeSeriesCV(
 
 def objective(trial):
     params = parse_hyperparameter_space(trial, HYPERPARAMETER_SPACE)
+    # Add seed parameter
+    params['seed'] = RANDOM_SEED
     # Add objective parameter to use custom_logloss
     fold_scores = []
 
@@ -407,24 +418,29 @@ def objective(trial):
             params,
             dtrain,
             valid_sets=[dtest],
-            callbacks=[lgb.early_stopping(150, verbose=False)],
-            feval=average_precision_eval  # Add fobj parameter for custom objective
+            callbacks=[lgb.early_stopping(50, verbose=False)],
+            feval=[average_precision_eval if HYPERPARAMETER_SPACE['boosting_type'][0] == 'average_precision_score' else auc_feval]  # Add fobj parameter for custom objective
         )
+        metric = average_precision_score if HYPERPARAMETER_SPACE['boosting_type'][0] == 'average_precision_score' else roc_auc_score
 
         # Compute metrics
         preds = bst.predict(X_test, num_iteration=bst.best_iteration)
-        aps = average_precision_score(y_test, preds)
+        aps = metric(y_test, preds, sample_weight = weights_test) if USE_RETURN_AS_WEIGHT else metric(y_test, preds)
         fold_scores.append(aps)
 
     return np.mean(fold_scores)
 
-study = optuna.create_study(direction='maximize')
+# Add a seeded sampler
+sampler = optuna.samplers.TPESampler(multivariate=True, seed=RANDOM_SEED)
+study = optuna.create_study(direction='maximize', sampler=sampler)
 study.optimize(objective, n_trials=OPTIMIZATION_TRIALS, show_progress_bar=True)
 
 
 best_params = study.best_params
 print(f"Best params: {best_params}")
 
+# Add seed to best_params
+best_params['seed'] = RANDOM_SEED
 
 # Save preprocessed data to model_data.h5
 with pd.HDFStore(DATA_STORE) as store:
