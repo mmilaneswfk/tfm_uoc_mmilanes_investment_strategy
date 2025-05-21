@@ -1,4 +1,5 @@
 import subprocess
+
 import yaml
 
 # Load configuration from the specified file
@@ -14,9 +15,11 @@ with open(config_path, 'r') as file:
 # Print confirmation
 print(f"Configuration loaded from {config_path}")
 
+
 def main():
     # Path to the virtual environment's Python interpreter
     venv_python = r"Scripts\python.exe"
+
 
     # Execute the dataset creation script only when BUIL_DATASET is true
     if BUILD_DATASET:
@@ -32,6 +35,7 @@ def main():
     
     # Execute the second script using the venv Python
     subprocess.run([venv_python, "./src/3_backtesting.py"], check=True)
+
 
 if __name__ == "__main__":
     main()

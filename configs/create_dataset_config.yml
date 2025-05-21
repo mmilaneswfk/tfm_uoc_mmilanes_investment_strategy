@@ -17,12 +17,14 @@ time_constants:
 start_year: 2000
 interval: '1wk'
 outlier_cutoff: 0.01
+
 normalize: true
 neutralize: false
 excess_return: true
 check_nulls_data: true
 chunk_size: 3
 chunk_delay_seconds: 10
+
 
 ticker_list:
   - XLE # Energy Select Sector SPDR Fund

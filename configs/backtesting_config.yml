@@ -18,9 +18,11 @@ CV_PURGE: 2
 COVID_FILTER: true
 USE_RETURN_AS_WEIGHT: false
 
+
 # Model Fixed Parameters
 model_params:
   objective: binary
+
   is_unbalance: true
   metric: average_precision_score
   boosting_type: gbdt
@@ -32,6 +34,7 @@ model_params:
 
 # Backtesting configuration
 backtest_start_date: 2021-01-01
+
 backtest_end_date: 2024-10-22 # Doesn't work if to_date is True
 backtest_to_date: True
 backtest_frequency: 1w
@@ -44,4 +47,5 @@ CATEGORICAL_FEATURES:
 
 ENABLE_OPTIMIZATION: true
 OPTIMIZATION_TRIALS: 30
+
 

@@ -1,9 +1,11 @@
 import lightgbm as lgb
 import pandas as pd
+
 from typing import List, Tuple, Dict, Optional, Union
 import os
 import pickle
 import numpy as np
+
 
 #--------------------------
 # Data Preparation Functions
@@ -16,11 +18,13 @@ def create_lgbm_dataset(X: pd.DataFrame,
                         end_date: Optional[str] = None,
                         sample_weights: Optional[pd.DataFrame] = None,
                         categorical_features: Optional[List[str]] = None
+
                         ) -> Tuple[lgb.Dataset, lgb.Dataset]:
     """
     Creates LightGBM datasets for training and validation based on date splitting.
     
     Args:
+
         X: Input features DataFrame with MultiIndex (first level security, second level datetime)
         y: Target variable Series with matching index to X
         lookback_period: Number of periods to look back for training
@@ -37,6 +41,7 @@ def create_lgbm_dataset(X: pd.DataFrame,
         end_date = pd.to_datetime(end_date)
     else:
         end_date = X.index.get_level_values('date').max()
+
     
     # Calculate start date
     start_date = end_date - pd.Timedelta(weeks=(lookback_period + n_test_periods))
@@ -47,7 +52,9 @@ def create_lgbm_dataset(X: pd.DataFrame,
     start_date = start_date.tz_localize('UTC')
     
     # Filter DataFrame and Series to include only the desired date range
+
     mask = (X.index.get_level_values('date') >= start_date) & (X.index.get_level_values('date') <= end_date)
+
     X = X[mask]
     y = y[mask]
     
@@ -462,6 +469,7 @@ def save_prediction_accuracy(accuracy_df: pd.DataFrame, calibrated_accuracy_df: 
     Returns:
         Tuple of paths where the accuracy files were saved
     """
+
     accuracy_path = os.path.join(os.path.dirname(config_path), '../output/prediction_accuracy.csv')
     calibrated_accuracy_path = os.path.join(os.path.dirname(config_path), '../output/prediction_accuracy_calibrated.csv')
     os.makedirs(os.path.dirname(accuracy_path), exist_ok=True)
@@ -534,6 +542,7 @@ def save_top_sector_analysis(top_sector_analysis: pd.DataFrame, config_path: str
     flush_file(file_path)
     top_sector_analysis.to_csv(file_path)
     return file_path
+
 
 def save_gains_analysis(total_gains: pd.Series, potential_gains: pd.Series, config_path: str) -> str:
     """
@@ -638,8 +647,7 @@ def save_dataframe_to_csv(
         return result_paths
     
     else:
-        raise TypeError("Data must be a DataFrame, Series, or dictionary of DataFrames/Series")
-    
+        raise TypeError("Data must be a DataFrame, Series, or dictionary of DataFrames/Series")    
 
 def create_refined_hyperparameter_space(
     hyperparameter_space: Dict, 

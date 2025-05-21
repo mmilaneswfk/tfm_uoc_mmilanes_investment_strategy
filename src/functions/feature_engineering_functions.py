@@ -292,7 +292,9 @@ def last_target_outcomes(df: pd.DataFrame, target_name: str, threshold: float = 
     result = df.copy()
     
     # Create binary labels
+
     result['target_binary'] = simple_labeling(result[target_name], threshold)
+
     
     # Create lag of binary target
     result = create_lags(result, 'target_binary', [1,2,4,8,12,26,52], prefix = 'fe_target_last_')
