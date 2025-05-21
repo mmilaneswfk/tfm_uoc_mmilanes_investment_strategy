@@ -1,7 +1,7 @@
 import pandas as pd
 import optuna
 import numpy as np
-from sklearn.metrics import average_precision_score
+from sklearn.metrics import average_precision_score, roc_auc_score
 
 def average_precision_eval(preds, data):
     # 1) Extract true labels as a 1-D numpy array
@@ -11,6 +11,22 @@ def average_precision_eval(preds, data):
     ap = average_precision_score(y_true, preds)   # sklearn signature: (y_true, y_score) :contentReference[oaicite:1]{index=1}
     # 4) Return name, value, and flag indicating “higher is better”
     return 'average_precision', ap, True
+
+def average_precision_eval_sklearn(preds, dataset):
+    # Extract true labels directly from the input dataset
+    y_true = dataset.astype(int)
+    # Compute average precision
+    ap = average_precision_score(y_true, preds)
+    # Return name, value, and flag indicating "higher is better"
+    return 'average_precision', ap, True
+
+def auc_feval(y_pred, dataset):
+    y_true = dataset.get_label()
+    # y_pred in LGB is raw score (not necessarily probabilities), 
+    # but roc_auc_score will work on scores directly.
+    auc = roc_auc_score(y_true, y_pred)
+    # Return name, result, is_higher_better
+    return 'custom_auc', auc, True
 
 def custom_logloss(preds, train_data):
     labels = train_data.get_label()

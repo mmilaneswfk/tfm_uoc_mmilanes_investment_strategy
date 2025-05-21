@@ -36,7 +36,8 @@ def aggregate_strategies_for_plot(strategy_results, strategy_names, compute_cumu
 
     return pd.DataFrame(processed)
 
-def aggregate_lag_returns_for_plot(strategy_results, strategy_names, return_column='return_1', compute_cumulative=True, round_decimals=3):
+
+def aggregate_lag_returns_for_plot(strategy_results, strategy_names, compute_cumulative=True, round_decimals=3):
     """
     Aggregates precomputed strategy returns for a specific lag period (default: 1) into a single DataFrame for plotting.
 
@@ -46,8 +47,6 @@ def aggregate_lag_returns_for_plot(strategy_results, strategy_names, return_colu
         List of DataFrames with 'return_X' columns returned by strategy functions.
     strategy_names : list of str
         Names to use for each series in the resulting DataFrame.
-    return_column : str, default='return_1'
-        Column name containing the returns to use (e.g., 'return_1').
     compute_cumulative : bool, default=True
         Whether to convert each series to cumulative returns.
     round_decimals : int or None, default=3
@@ -99,13 +98,13 @@ def sp500_benchmark(returns_spy, reference_index, **kwargs):
     """S&P 500 benchmark strategy."""
     return returns_spy.loc[reference_index]
 
-def average_sector_strategy(target, **kwargs):
+def average_sector_strategy(target_df, **kwargs):
     """
     Strategy that equally weights investment across all sectors.
     
     Parameters:
     -----------
-    target : pandas.DataFrame
+    target_df : pandas.DataFrame
         DataFrame with dates as index and sectors as columns containing returns.
     **kwargs : dict
         Additional keyword arguments (not used but included for consistency).
@@ -116,7 +115,7 @@ def average_sector_strategy(target, **kwargs):
         Average returns across all sectors for each date.
     """
     # Calculate mean across all sectors for each date
-    return target.mean(axis=1)
+    return target_df.mean(axis=1)
 
 
 def top_n_periodic_strategy(predicted_proba, target, N, valid=None, **kwargs):
@@ -152,6 +151,9 @@ def top_n_periodic_strategy(predicted_proba, target, N, valid=None, **kwargs):
     else:
         if not valid.index.equals(target.index) or not valid.columns.equals(target.columns):
             raise ValueError("valid must share the same index and columns as target")
+        
+    # predicted_proba = predicted_proba.shift(1, freq = 'W-SUN').iloc[:-1]
+    # valid = valid.shift(1, freq = 'W-SUN').iloc[:-1]
 
     daily_returns = []
     dates = predicted_proba.index

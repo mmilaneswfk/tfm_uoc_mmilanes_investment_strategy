@@ -8,15 +8,16 @@ lgbm_classification_model: tuning_lgb_classi_new.h5
 # Parameters
 YEAR: 52
 TARGET_THRESHOLD: 0
-YEARS_TRAIN: 10
-WEEKS_TEST: 1
-CV_SPLITS: 80
-CV_PURGE: 1
+YEARS_TRAIN: 4
+WEEKS_TEST: 2
+CV_SPLITS: 10
+CV_PURGE: 2
 delete_trained: True
-VALIDATION_DATE: 2022-01-01
+VALIDATION_DATE: 2021-01-01
+COVID_FILTER: True
 USE_SELECTION_IF_AVAILABLE: false
-KEEP_TIME_FEATURES: false
-USE_RETURN_AS_WEIGHT: true
+KEEP_TIME_FEATURES: true
+USE_RETURN_AS_WEIGHT: false
 
 # Target
 TARGET_NAME: target_1
@@ -24,6 +25,15 @@ TARGET_NAME: target_1
 COLUMNS_TO_KEEP:
   - 'sector'
   - 'weekofyear'
+  - 'vix'
+  - 'vixoil'
+  - 'yield_curve'
+  - 'corp_oas'
+  - 'sentiment'
+  - 'weekjobclaims'
+  - 'inflation'
+  - 'leading'
+
 
 COLUMNS_TO_DROP:
 
@@ -38,16 +48,13 @@ FAMA_FRENCH_FACTORS:
 LAGS:  [1, 2, 3, 4, 8, 12, 26, 52]
 
 ROLLING:
+  - [4, 1, 'mean']
+  - [4, 1, 'max']
   - [12, 1, 'mean']
   - [12, 1, 'max']
   - [12, 1, 'std']
   - [12, 1, 'sum']
   - [12, 2, 'mean']
-  - [26, 1, 'mean']
-  - [26, 2, 'mean']
-  - [52, 1, 'mean']
-  - [52, 1, 'std']
-  - [52, 2, 'mean']
 
 MOMENTUM:
   - [2, 1, 1]
@@ -62,7 +69,17 @@ DIFF:
   - ['HML', 1]
   - ['RMW', 1]
   - ['CMA', 1]
+  - ['Mkt-RF', 52]
+  - ['SMB', 52]
+  - ['HML', 52]
+  - ['RMW', 52]
+  - ['CMA', 52]
   - ['lag_1', 1]
+  - ['lag_1', 4]
+  - ['lag_1', 8]
+  - ['lag_1', 52]
+  - ['lag_4', 1]
+  - ['lag_4', 4]
   - ['lag_52', 1]
 
 
@@ -76,45 +93,3 @@ CATEGORICAL_FEATURES:
 
 OPTIMIZATION_TRIALS: 30
 
-# HYPERPARAMETER_SPACE:
-#   objective: [binary]
-#   is_unbalance: [true]
-#   metric: [average_precision_score]
-#   boosting_type: [rf]
-#   extra_trees : [true]
-#   use_quantized_grad : [true]
-#   num_grad_quant_bins : ['int',5,30]
-#   num_iterations: ['int', 10, 200]
-#   n_estimators: ['int', 10, 200]
-#   lambda_l1: ['loguniform', 0.0001, 10.0]
-#   lambda_l2: ['loguniform', 0.0001, 10.0]
-#   max_depth: ['int', 5, 400]
-#   num_leaves: ['int', 16, 200]
-#   learning_rate: ['loguniform', 0.001, 1.0]
-#   subsample: ['uniform', 0.6, 1.0]
-#   bagging_fraction: ['uniform', 0.6, 1.0]
-#   bagging_freq: ['int', 1, 10]
-#   min_child_samples: ['int', 5, 100]
-#   min_gain_to_split : ['uniform', 0.1, 1.0]
-#   verbose: [-1]
-
-HYPERPARAMETER_SPACE:
-  objective: ['binary']
-  is_unbalance: [false]
-  metric: ['average_precision_score']
-  boosting_type: ['gbdt']
-  extra_trees: [true]
-  # use_quantized_grad: [true]
-  # num_grad_quant_bins: ['int', 8, 64]
-  # num_iterations: ['int', 10, 400]
-  lambda_l1: ['loguniform', 0.0001, 10.0]
-  lambda_l2: ['loguniform', 0.0001, 10.0]
-  max_depth: ['int', 5, 500]
-  n_estimators: ['int', 100, 1000]
-  # num_leaves: ['int', 20, 100]
-  learning_rate: ['loguniform', 0.001, 10.0]
-  subsample: ['uniform', 0.6, 0.8]
-  colsample_bytree: ['uniform', 0.6, 0.8]
-  # min_child_samples: ['int', 5, 100]
-  # min_gain_to_split: ['uniform', 0.1, 1.0]
-  verbose: [-1]

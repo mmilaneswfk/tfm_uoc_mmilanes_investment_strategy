@@ -1,0 +1,28 @@
+# HYPERPARAMETER_SPACE:
+#   objective: ['binary']
+#   is_unbalance: [true]
+#   metric: ['average_precision_score']
+#   boosting_type: ['rf']
+#   extra_trees: [false]
+#   max_depth: ['int', 3, 10]
+#   n_estimators: ['int', 10, 200]
+#   num_leaves: ['int', 10, 30]  # Uncommented num_leaves
+#   learning_rate: ['loguniform', 0.0001, 0.5]
+#   reg_lambda: ['loguniform', 0.001, 0.2]
+#   colsample_bytree: ['uniform', 0.7, 0.9]
+#   verbose: [-1]
+
+HYPERPARAMETER_SPACE:
+  objective: ['binary']
+  is_unbalance: [true]
+  metric: ['average_precision_score']
+  boosting_type: ['gbdt']
+  extra_trees: [true]
+  max_depth: ['int', 3, 20]           
+  num_leaves: ['int', 10, 50]         
+  num_iterations : ['int', 200, 800]    
+  learning_rate: ['loguniform', 0.001, 0.1]
+  colsample_bytree: ['uniform', 0.2, 0.9]
+  subsample: ['uniform', 0.5, 1.0]      
+  min_child_samples: ['int', 20, 100]
+  verbose: [-1]
