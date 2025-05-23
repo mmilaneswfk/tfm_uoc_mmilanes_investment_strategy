@@ -438,9 +438,9 @@ def main():
 
     # Correlation Heatmap
     st.subheader("Mapa de Calor de Correlaciones")
-    corr_data = correlation_data.round(2)
+    corr_data = correlation_data.dropna().round(2)
     plt.figure(figsize=(18, 12))
-    ax = sns.heatmap(corr_data, annot=True, fmt=".2f", cmap="coolwarm", square=True)
+    ax = sns.heatmap(corr_data, annot=True, fmt=".2f", cmap="coolwarm", square=True, annot_kws={"size": 8})
     plt.title("Heatmap de Correlaciones")
     st.pyplot(plt.gcf())
     plt.close()
